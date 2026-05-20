@@ -3,7 +3,132 @@
 <head>
 <meta charset="UTF-8">
 <title>Infinite World Explorer</title>
-<link rel="stylesheet" href="style.css">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; }
+canvas { display: block; }
+
+#overlay {
+  position: fixed; inset: 0;
+  background: linear-gradient(160deg, #0a0e1a 0%, #1a2235 60%, #0a0e1a 100%);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: #d8cfc0; font-family: Georgia, serif;
+  z-index: 100; cursor: pointer; user-select: none;
+}
+#overlay h1 {
+  font-size: 5em; letter-spacing: 12px;
+  text-shadow: 0 0 40px rgba(200,170,100,0.4);
+  margin-bottom: 6px;
+}
+#overlay .sub {
+  font-size: 1em; opacity: 0.5; letter-spacing: 5px; margin-bottom: 50px;
+}
+#overlay .cta {
+  font-size: 1.2em; opacity: 0.8;
+  animation: blink 2.2s ease-in-out infinite;
+}
+@keyframes blink { 0%,100%{opacity:0.4} 50%{opacity:1} }
+#overlay .keys {
+  margin-top: 28px; font-size: 0.78em;
+  opacity: 0.35; line-height: 2.2; text-align: center; letter-spacing: 1px;
+}
+
+#hud {
+  position: fixed; bottom: 18px; left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.8);
+  font-family: 'Courier New', monospace;
+  font-size: 12px; text-align: center;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+  pointer-events: none; z-index: 10; letter-spacing: 1px;
+}
+#genindicator {
+  position: fixed; top: 14px; right: 14px;
+  color: rgba(255,255,255,0.45);
+  font-family: monospace; font-size: 11px;
+  pointer-events: none; z-index: 10;
+}
+#crosshair {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none; z-index: 10;
+  width: 0; height: 0;
+}
+#minimap {
+  position: fixed; top: 14px; left: 14px;
+  width: 200px; height: 200px;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+  pointer-events: none; z-index: 10;
+  overflow: hidden;
+}
+#minimap canvas { display: block; width: 200px; height: 200px; image-rendering: pixelated; }
+#mm-label {
+  position: fixed; top: 218px; left: 14px;
+  color: rgba(255,255,255,0.55); font-family: monospace;
+  font-size: 10px; pointer-events: none; z-index: 10; letter-spacing: 1px;
+}
+#mm-layers {
+  position: fixed; top: 234px; left: 14px;
+  display: flex; flex-wrap: wrap; gap: 4px; width: 200px; z-index: 10;
+}
+#mm-layers button {
+  padding: 2px 7px; font-family: monospace; font-size: 9px; letter-spacing: 1px;
+  background: rgba(10,14,26,0.75); border: 1px solid rgba(255,255,255,0.18);
+  color: rgba(255,255,255,0.5); border-radius: 2px; cursor: pointer; transition: all 0.12s;
+}
+#mm-layers button:hover  { color: #fff; border-color: rgba(255,255,255,0.5); }
+#mm-layers button.active { color: #adf; border-color: #6ca0c8; background: rgba(108,160,200,0.18); }
+#crosshair::before, #crosshair::after {
+  content: ''; position: absolute;
+  background: rgba(255,255,255,0.8);
+  box-shadow: 0 0 4px rgba(0,0,0,0.7);
+}
+#crosshair::before { width: 1px; height: 20px; left: 0; top: -10px; }
+#crosshair::after  { width: 20px; height: 1px; left: -10px; top: 0; }
+
+/* ── Settings Panel ─────────────────────────────────────────────────────── */
+#panel {
+  position: fixed; top: 0; right: -340px; width: 320px; height: 100%;
+  background: rgba(10,14,26,0.93); backdrop-filter: blur(8px);
+  border-left: 1px solid rgba(255,255,255,0.1);
+  color: #ccc; font-family: 'Courier New', monospace; font-size: 12px;
+  z-index: 200; overflow-y: auto; padding: 20px 18px 40px;
+  transition: right 0.25s ease; pointer-events: all;
+}
+#panel.open { right: 0; }
+#panel h2 { color: #e8dcc8; font-size: 14px; letter-spacing: 3px; margin-bottom: 18px; }
+#panel h3 { color: rgba(255,255,255,0.4); font-size: 10px; letter-spacing: 2px;
+            text-transform: uppercase; margin: 18px 0 10px; border-top: 1px solid rgba(255,255,255,0.07);
+            padding-top: 12px; }
+#panel label { display: block; margin-bottom: 2px; opacity: 0.7; }
+#panel input[type=range] { width: 100%; accent-color: #6ca0c8; margin-bottom: 10px; cursor: pointer; }
+#panel input[type=number], #panel input[type=text] {
+  width: 100%; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+  color: #eee; padding: 5px 8px; border-radius: 3px; font-family: monospace;
+  margin-bottom: 8px; box-sizing: border-box;
+}
+#panel .row { display: flex; gap: 8px; margin-bottom: 10px; }
+#panel button {
+  flex: 1; padding: 7px; background: rgba(108,160,200,0.2); border: 1px solid rgba(108,160,200,0.4);
+  color: #aaccee; border-radius: 3px; cursor: pointer; font-family: monospace; font-size: 11px;
+  letter-spacing: 1px; transition: background 0.15s;
+}
+#panel button:hover { background: rgba(108,160,200,0.38); }
+#panel button.danger { background: rgba(200,80,60,0.18); border-color: rgba(200,80,60,0.4); color: #e88; }
+#panel button.danger:hover { background: rgba(200,80,60,0.35); }
+#panel .val { float: right; opacity: 0.55; }
+#panel-tab {
+  position: fixed; top: 50%; right: 0; transform: translateY(-50%);
+  background: rgba(10,14,26,0.8); border: 1px solid rgba(255,255,255,0.1);
+  border-right: none; color: rgba(255,255,255,0.5); writing-mode: vertical-rl;
+  padding: 12px 6px; border-radius: 4px 0 0 4px; cursor: pointer; z-index: 199;
+  font-family: monospace; font-size: 11px; letter-spacing: 2px; transition: color 0.15s;
+}
+#panel-tab:hover { color: #fff; }
+</style>
 </head>
 <body>
 
@@ -881,6 +1006,7 @@ const _treePos    = new THREE.Vector3();
 const _treeScale  = new THREE.Vector3();
 
 function buildChunkTrees(cx, cz) {
+  const obstacleKey = cKey(cx, cz);
   const ox = cx * CHUNK_SIZE, oz = cz * CHUNK_SIZE;
   const lists = { conifer: [], deciduous: [], jungle: [], cactus: [] };
   const spacing = 22;
@@ -924,6 +1050,8 @@ function buildChunkTrees(cx, cz) {
       _treeScale.setScalar(data[base + 3]);
       _treeMatrix.compose(_treePos, _treeQuat, _treeScale);
       im.setMatrixAt(i, _treeMatrix);
+      // Record as obstacle so villagers steer around it. Radius scales with tree.
+      addObstacle(obstacleKey, data[base], data[base + 2], 2.2 * data[base + 3]);
     }
     im.instanceMatrix.needsUpdate = true;
     meshes.push(im);
@@ -960,7 +1088,7 @@ const villageLocations = []; // for minimap display
 
 function findVillageForChunk(cx, cz) {
   const r = (sn1.noise2D(cx * 5.13 + 0.5, cz * 5.13 - 0.5) + 1) * 0.5;
-  if (r < 0.75) return null;
+  if (r < 0.75) { return null; }
 
   const jx = ((sn2.noise2D(cx * 3.7, cz * 3.7) + 1) * 0.3) + 0.2;
   const jz = ((sn2.noise2D(cx * 3.7 + 9, cz * 3.7 + 9) + 1) * 0.3) + 0.2;
@@ -968,18 +1096,22 @@ function findVillageForChunk(cx, cz) {
   const wz = (cz + jz) * CHUNK_SIZE;
 
   const bio = getBiome(wx, wz).name;
-  if (bio === 'desert') return null;
+  if (bio === 'desert' || bio === 'mountains') { console.log(`[village] chunk(${cx},${cz}) rejected: biome=${bio}`); return null; }
 
   const vh = getHeight(wx, wz);
-  if (vh < G_SEA_LEVEL + 1 || vh > 95) return null;
+  if (vh <= G_SEA_LEVEL || vh > 70) { console.log(`[village] chunk(${cx},${cz}) rejected: height=${vh.toFixed(1)} sea=${G_SEA_LEVEL}`); return null; }
 
-  const hs = [getHeight(wx+30,wz), getHeight(wx-30,wz), getHeight(wx,wz+30), getHeight(wx,wz-30)];
-  if (Math.max(...hs) - Math.min(...hs) > 30) return null;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const rh = getHeight(wx + Math.cos(a) * 50, wz + Math.sin(a) * 50);
+    if (rh < G_SEA_LEVEL + 1) { console.log(`[village] chunk(${cx},${cz}) rejected: ring water rh=${rh.toFixed(1)}`); return null; }
+  }
 
+  console.log(`[village] chunk(${cx},${cz}) ACCEPTED at (${wx.toFixed(0)},${wz.toFixed(0)}) h=${vh.toFixed(1)} bio=${bio}`);
   return { wx, wz, seed: (Math.imul(cx, 99991) + cz) | 0 };
 }
 
-function buildVillageAt(wx, wz, seed) {
+function buildVillageAt(wx, wz, seed, obstacleKey) {
   const rng  = new VillageRNG(seed);
   const count = 5 + (rng.next() * 4 | 0);
   const meshes = [];
@@ -1003,6 +1135,7 @@ function buildVillageAt(wx, wz, seed) {
     m4.compose(p, q, s);
     walls.setMatrixAt(i, m4);
     roofs.setMatrixAt(i, m4);
+    if (obstacleKey) addObstacle(obstacleKey, hx, hz, 7);
   }
   walls.instanceMatrix.needsUpdate = true;
   roofs.instanceMatrix.needsUpdate = true;
@@ -1191,6 +1324,7 @@ function freeSlot(type) {
 function spawnAnimal(type, wx, wz) {
   const slot = freeSlot(type);
   if (slot < 0) return null;
+  const reproCooldown = type === 'wolf' ? 55 + Math.random() * 20 : 18 + Math.random() * 12;
   const a = {
     type, slot, alive: true,
     x: wx, z: wz, y: getHeight(wx, wz),
@@ -1198,6 +1332,7 @@ function spawnAnimal(type, wx, wz) {
     hunger: 0, target: null,
     wanderAng: Math.random() * Math.PI * 2,
     wanderTimer: 1 + Math.random() * 3,
+    reproTimer: reproCooldown,
   };
   _animalSlots[type][slot] = a;
   animals.push(a);
@@ -1279,15 +1414,20 @@ function updateAnimals(dt) {
         a.vz = Math.sin(a.wanderAng) * 4;
       }
     } else {
-      // Herbivore: flee nearby wolf, otherwise wander
-      let wolf = null, wd = Infinity;
+      // Herbivore: flee nearest threat (wolf OR hunting villager)
+      let threat = null, td = Infinity;
       for (const o of animals) {
         if (!o.alive || o.type !== 'wolf') continue;
         const d = (o.x - a.x) ** 2 + (o.z - a.z) ** 2;
-        if (d < wd) { wd = d; wolf = o; }
+        if (d < td) { td = d; threat = o; }
       }
-      if (wolf && wd < 45 * 45) {
-        const dx = a.x - wolf.x, dz = a.z - wolf.z;
+      for (const h of villagers) {
+        if (!h.alive || h.state !== 'hunting') continue;
+        const d = (h.x - a.x) ** 2 + (h.z - a.z) ** 2;
+        if (d < td) { td = d; threat = h; }
+      }
+      if (threat && td < 45 * 45) {
+        const dx = a.x - threat.x, dz = a.z - threat.z;
         const d = Math.sqrt(dx * dx + dz * dz) || 0.01;
         a.vx = dx / d * SPEED;
         a.vz = dz / d * SPEED;
@@ -1302,10 +1442,29 @@ function updateAnimals(dt) {
       }
     }
 
+    applyAvoid(a);
+
     a.x += a.vx * dt;
     a.z += a.vz * dt;
     a.y = getHeight(a.x, a.z);
     if (a.vx * a.vx + a.vz * a.vz > 0.5) a.yaw = Math.atan2(a.vx, a.vz);
+
+    // Reproduction
+    a.reproTimer -= dt;
+    if (a.reproTimer <= 0) {
+      a.reproTimer = (a.type === 'wolf' ? 55 : 18) + Math.random() * 12;
+      const count = animals.filter(o => o.alive && o.type === a.type).length;
+      if (count < TARGET_COUNTS[a.type] * 1.4) {
+        for (const b of animals) {
+          if (!b.alive || b === a || b.type !== a.type) continue;
+          const d2 = (b.x - a.x) ** 2 + (b.z - a.z) ** 2;
+          if (d2 < 18 * 18) {
+            spawnAnimal(a.type, a.x + (Math.random()-0.5)*4, a.z + (Math.random()-0.5)*4);
+            break;
+          }
+        }
+      }
+    }
 
     const ddx = a.x - camera.position.x, ddz = a.z - camera.position.z;
     if (ddx * ddx + ddz * ddz > 500 * 500) despawnAnimal(a);
@@ -1328,6 +1487,367 @@ function updateAnimals(dt) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  VILLAGERS — walk near home, occasionally explore, avoid obstacles + terrain,
+//  bridge water, and found new settlements at suitable distant flat sites.
+// ─────────────────────────────────────────────────────────────────────────────
+const MAX_VILLAGERS = 80;
+const VILLAGER_PER_VILLAGE = 4;
+const MIGRATE_THRESHOLD = 7; // village pop that triggers a migration group
+let _migrateCheckTimer = 15;
+const villagers = [];
+const obstacles = new Map(); // chunkKey → [{ x, z, r }, …]
+const bridges   = [];
+let villagerStats = { founded: 0, bridges: 0, caught: 0 };
+
+let VILLAGER_GEO, VILLAGER_MAT, BRIDGE_MAT, villagerMesh;
+(function initVillagerGeo() {
+  // Sized so they read clearly from the air — total ~3.6 units tall.
+  const body = new THREE.BoxGeometry(1.3, 2.6, 0.8); body.translate(0, 1.3, 0);
+  const head = new THREE.BoxGeometry(0.9, 0.9, 0.9); head.translate(0, 3.05, 0);
+  VILLAGER_GEO = _mergeGeos(body, head);
+  VILLAGER_MAT = new THREE.MeshStandardMaterial({ color: 0xd83020, roughness: 0.7 }); // bright red — easy to spot
+  BRIDGE_MAT   = new THREE.MeshStandardMaterial({ color: 0x6a4830, roughness: 0.95 });
+})();
+
+villagerMesh = new THREE.InstancedMesh(VILLAGER_GEO, VILLAGER_MAT, MAX_VILLAGERS);
+villagerMesh.frustumCulled = false; villagerMesh.castShadow = true;
+const _hideV = new THREE.Matrix4().makeScale(0, 0, 0);
+for (let i = 0; i < MAX_VILLAGERS; i++) villagerMesh.setMatrixAt(i, _hideV);
+villagerMesh.instanceMatrix.needsUpdate = true;
+scene.add(villagerMesh);
+
+const _vSlots = new Array(MAX_VILLAGERS).fill(null);
+function findVSlot() {
+  for (let i = 0; i < MAX_VILLAGERS; i++) if (_vSlots[i] === null) return i;
+  return -1;
+}
+
+function spawnVillager(village) {
+  const slot = findVSlot();
+  if (slot < 0) return null;
+  const ang  = Math.random() * Math.PI * 2;
+  const dist = 5 + Math.random() * 22;
+  const x = village.wx + Math.cos(ang) * dist;
+  const z = village.wz + Math.sin(ang) * dist;
+  const v = {
+    slot, alive: true,
+    homeKey: village.key, homeX: village.wx, homeZ: village.wz,
+    x, z, y: getHeight(x, z),
+    vx: 0, vz: 0, yaw: 0,
+    state: 'idle', stateTimer: Math.random() * 4,
+    reproTimer: 25 + Math.random() * 20,
+    migrateDir: 0, migrateSteps: 0, migrateGroupId: -1, stuckCounter: 0,
+  };
+  _vSlots[slot] = v;
+  villagers.push(v);
+  return v;
+}
+
+function despawnVillager(v) {
+  if (!v.alive) return;
+  v.alive = false;
+  _vSlots[v.slot] = null;
+}
+
+function addObstacle(key, x, z, r) {
+  let arr = obstacles.get(key);
+  if (!arr) { arr = []; obstacles.set(key, arr); }
+  arr.push({ x, z, r });
+}
+
+// Soft repulsion from any tree/house within its radius.
+function applyAvoid(v) {
+  const cx = Math.floor(v.x / CHUNK_SIZE);
+  const cz = Math.floor(v.z / CHUNK_SIZE);
+  let fx = 0, fz = 0;
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const arr = obstacles.get(cKey(cx + dx, cz + dz));
+      if (!arr) continue;
+      for (const o of arr) {
+        const ddx = v.x - o.x, ddz = v.z - o.z;
+        const d2 = ddx*ddx + ddz*ddz;
+        const r = o.r + 1.5;
+        if (d2 < r * r && d2 > 0.01) {
+          const d = Math.sqrt(d2);
+          const push = (r - d) / r * 12;
+          fx += ddx / d * push;
+          fz += ddz / d * push;
+        }
+      }
+    }
+  }
+  v.vx += fx;
+  v.vz += fz;
+}
+
+// Bridge across a water gap in the villager's current direction.
+function buildBridge(v) {
+  let len;
+  for (len = 5; len < 70; len += 4) {
+    const tx = v.x + Math.sin(v.exploreDir) * len;
+    const tz = v.z + Math.cos(v.exploreDir) * len;
+    if (getHeight(tx, tz) > G_SEA_LEVEL - 0.5) break;
+  }
+  if (len >= 70) return false;
+
+  const geo = new THREE.BoxGeometry(3, 0.4, len);
+  const bridge = new THREE.Mesh(geo, BRIDGE_MAT);
+  bridge.position.set(
+    v.x + Math.sin(v.exploreDir) * len * 0.5,
+    G_SEA_LEVEL + 0.5,
+    v.z + Math.cos(v.exploreDir) * len * 0.5,
+  );
+  bridge.rotation.y = -v.exploreDir;
+  bridge.castShadow = true;
+  scene.add(bridge);
+  bridges.push(bridge);
+
+  // Step the villager just past the far side
+  v.x += Math.sin(v.exploreDir) * (len + 3);
+  v.z += Math.cos(v.exploreDir) * (len + 3);
+  villagerStats.bridges++;
+  return true;
+}
+
+function canFoundVillage(wx, wz) {
+  const bio = getBiome(wx, wz).name;
+  if (bio === 'desert' || bio === 'mountains') return false;
+  const h = getHeight(wx, wz);
+  if (h < G_SEA_LEVEL + 3 || h > 90) return false;
+  for (const vl of villageLocations) {
+    if ((vl.wx - wx) ** 2 + (vl.wz - wz) ** 2 < 250 * 250) return false;
+  }
+  // House ring must be on land
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    if (getHeight(wx + Math.cos(a) * 50, wz + Math.sin(a) * 50) < G_SEA_LEVEL + 1) return false;
+  }
+  return true;
+}
+
+function foundNewVillage(v) {
+  const wx = v.x, wz = v.z;
+  const cx = Math.floor(wx / CHUNK_SIZE);
+  const cz = Math.floor(wz / CHUNK_SIZE);
+  const key = cKey(cx, cz);
+  const seed = (Math.imul(cx, 99991) + cz) ^ (Date.now() & 0xffff);
+
+  const meshes = buildVillageAt(wx, wz, seed);
+  meshes.forEach(m => scene.add(m));
+
+  // Record house positions as obstacles so other villagers walk around them.
+  for (const m of meshes) {
+    if (!m.isInstancedMesh) continue;
+    const M = new THREE.Matrix4();
+    const P = new THREE.Vector3();
+    for (let i = 0; i < m.count; i++) {
+      m.getMatrixAt(i, M);
+      P.setFromMatrixPosition(M);
+      addObstacle(key, P.x, P.z, 5);
+    }
+  }
+
+  // Attach meshes to existing chunk so unload disposes them properly
+  const existing = chunkCache.get(key);
+  if (existing) existing.trees.push(...meshes);
+
+  villageLocations.push({ wx, wz, key });
+  const newVillage = { wx, wz, key };
+  for (let i = 0; i < VILLAGER_PER_VILLAGE - 1; i++) spawnVillager(newVillage);
+
+  // The founder switches their home to the new settlement
+  v.homeKey = key; v.homeX = wx; v.homeZ = wz;
+  villagerStats.founded++;
+}
+
+const _vMat = new THREE.Matrix4();
+const _vPos = new THREE.Vector3();
+const _vQuat = new THREE.Quaternion();
+const _vScale = new THREE.Vector3(1, 1, 1);
+
+function updateVillagers(dt) {
+  // Trigger migration when a village is overcrowded
+  _migrateCheckTimer -= dt;
+  if (_migrateCheckTimer <= 0) {
+    _migrateCheckTimer = 20;
+    const counts = new Map();
+    for (const v of villagers) {
+      if (!v.alive || v.state === 'migrating') continue;
+      counts.set(v.homeKey, (counts.get(v.homeKey) || 0) + 1);
+    }
+    for (const [key, count] of counts) {
+      if (count >= MIGRATE_THRESHOLD) {
+        const candidates = villagers.filter(o => o.alive && o.homeKey === key && o.state === 'idle');
+        if (candidates.length >= 2) {
+          const groupId = Date.now();
+          const dir = Math.random() * Math.PI * 2;
+          for (let i = 0; i < 2; i++) {
+            const m = candidates[i];
+            m.state = 'migrating';
+            m.migrateDir = dir + (Math.random() - 0.5) * 0.4;
+            m.migrateSteps = 130 + Math.random() * 60;
+            m.migrateGroupId = groupId;
+            m.stuckCounter = 0;
+          }
+        }
+      }
+    }
+  }
+
+  for (const v of villagers) {
+    if (!v.alive) continue;
+    v.stateTimer -= dt;
+
+    if (v.state === 'idle') {
+      v.vx *= 0.7; v.vz *= 0.7;
+
+      // Reproduction: grow the village while it's small
+      v.reproTimer -= dt;
+      if (v.reproTimer <= 0) {
+        v.reproTimer = 25 + Math.random() * 20;
+        const homeCount = villagers.filter(o => o.alive && o.homeKey === v.homeKey && o.state !== 'migrating').length;
+        if (homeCount < MIGRATE_THRESHOLD) spawnVillager({ wx: v.homeX, wz: v.homeZ, key: v.homeKey });
+      }
+
+      if (v.stateTimer <= 0) {
+        let prey = null, pd = Infinity;
+        for (const o of animals) {
+          if (!o.alive || (o.type !== 'rabbit' && o.type !== 'deer')) continue;
+          const dx = o.x - v.x, dz = o.z - v.z;
+          const d2 = dx*dx + dz*dz;
+          if (d2 < pd && d2 < 70 * 70) { pd = d2; prey = o; }
+        }
+        if (prey && Math.random() < 0.55) {
+          v.state = 'hunting';
+          v.target = prey;
+          v.huntTimer = 12;
+        } else {
+          v.state = 'wandering';
+        }
+        v.stateTimer = 3 + Math.random() * 4;
+      }
+    } else if (v.state === 'hunting') {
+      v.huntTimer -= dt;
+      // Drop target if it died or wandered too far
+      if (!v.target || !v.target.alive) v.target = null;
+      if (v.target) {
+        const ddx = v.target.x - v.x, ddz = v.target.z - v.z;
+        const d2 = ddx*ddx + ddz*ddz;
+        if (d2 > 120 * 120) v.target = null;
+      }
+      if (!v.target || v.huntTimer <= 0) {
+        v.state = 'idle';
+        v.stateTimer = 2;
+        v.target = null;
+      } else {
+        const ddx = v.target.x - v.x, ddz = v.target.z - v.z;
+        const d = Math.sqrt(ddx*ddx + ddz*ddz);
+        if (d < 3.5) {
+          // Caught — eat the animal
+          despawnAnimal(v.target);
+          villagerStats.caught++;
+          v.target = null;
+          v.state = 'idle';
+          v.stateTimer = 3 + Math.random() * 2;
+        } else {
+          v.vx = ddx / d * 14;  // fast enough to outrun deer/rabbit
+          v.vz = ddz / d * 14;
+        }
+      }
+    } else if (v.state === 'wandering') {
+      const dxH = v.x - v.homeX, dzH = v.z - v.homeZ;
+      const distH = Math.sqrt(dxH*dxH + dzH*dzH);
+      let dir;
+      if (distH > 55) {
+        dir = Math.atan2(-dxH, -dzH); // turn back toward home
+      } else {
+        dir = v.yaw + (Math.random() - 0.5) * 0.7;
+      }
+      v.vx = Math.sin(dir) * 2.5;
+      v.vz = Math.cos(dir) * 2.5;
+      if (v.stateTimer <= 0) { v.state = 'idle'; v.stateTimer = 2 + Math.random() * 4; }
+    } else if (v.state === 'migrating') {
+      v.migrateSteps -= dt;
+      v.vx = Math.sin(v.migrateDir) * 5.5;
+      v.vz = Math.cos(v.migrateDir) * 5.5;
+
+      const lookX = v.x + v.vx * 0.9;
+      const lookZ = v.z + v.vz * 0.9;
+      const lookH = getHeight(lookX, lookZ);
+
+      const reroute = (predicate) => {
+        let bestAng = null, bestScore = -Infinity;
+        for (let i = 0; i < 8; i++) {
+          const ang = v.migrateDir + (i - 3.5) * 0.45;
+          const tx = v.x + Math.sin(ang) * 14;
+          const tz = v.z + Math.cos(ang) * 14;
+          const th = getHeight(tx, tz);
+          if (predicate(th)) {
+            const score = -Math.abs(ang - v.migrateDir);
+            if (score > bestScore) { bestScore = score; bestAng = ang; }
+          }
+        }
+        return bestAng;
+      };
+
+      if (lookH < G_SEA_LEVEL + 0.5) {
+        const alt = reroute(th => th > G_SEA_LEVEL + 0.5);
+        if (alt !== null) { v.migrateDir = alt; v.stuckCounter = 0; }
+        else {
+          v.stuckCounter += dt;
+          if (v.stuckCounter > 1.8) {
+            if (!buildBridge(v)) v.migrateDir += Math.PI;
+            v.stuckCounter = 0;
+          }
+        }
+      } else if (lookH - v.y > 5) {
+        const alt = reroute(th => th > G_SEA_LEVEL + 0.5 && Math.abs(th - v.y) < 5);
+        if (alt !== null) v.migrateDir = alt;
+        else v.migrateDir += Math.PI * 0.5;
+      }
+
+      const dxH = v.x - v.homeX, dzH = v.z - v.homeZ;
+      const distH = Math.sqrt(dxH*dxH + dzH*dzH);
+      if (distH > 350 && canFoundVillage(v.x, v.z)) {
+        // Check if group partner is also close by before founding
+        const partner = villagers.find(o => o.alive && o !== v && o.migrateGroupId === v.migrateGroupId);
+        if (!partner || (partner.x - v.x) ** 2 + (partner.z - v.z) ** 2 < 100 * 100) {
+          foundNewVillage(v);
+          if (partner) { partner.homeKey = v.homeKey; partner.homeX = v.homeX; partner.homeZ = v.homeZ; partner.state = 'idle'; partner.stateTimer = 5; }
+          v.state = 'idle'; v.stateTimer = 5;
+        }
+      } else if (v.migrateSteps <= 0 || distH > 1100) {
+        v.state = 'wandering'; v.stateTimer = 4; // give up, wander back
+      }
+    }
+
+    applyAvoid(v);
+
+    v.x += v.vx * dt;
+    v.z += v.vz * dt;
+    v.y = Math.max(G_SEA_LEVEL, getHeight(v.x, v.z));
+    if (v.vx*v.vx + v.vz*v.vz > 0.1) v.yaw = Math.atan2(v.vx, v.vz);
+
+    const ddx = v.x - camera.position.x, ddz = v.z - camera.position.z;
+    if (ddx*ddx + ddz*ddz > 1100*1100) despawnVillager(v);
+  }
+
+  // Compact dead villagers
+  for (let i = villagers.length - 1; i >= 0; i--) if (!villagers[i].alive) villagers.splice(i, 1);
+
+  // Update instance transforms
+  for (let i = 0; i < MAX_VILLAGERS; i++) villagerMesh.setMatrixAt(i, _hideV);
+  for (const v of villagers) {
+    _vPos.set(v.x, v.y, v.z);
+    _vQuat.setFromAxisAngle({ x: 0, y: 1, z: 0 }, v.yaw);
+    _vMat.compose(_vPos, _vQuat, _vScale);
+    villagerMesh.setMatrixAt(v.slot, _vMat);
+  }
+  villagerMesh.instanceMatrix.needsUpdate = true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  ROADS — connect each village to its nearest neighbor (tile-based path)
 // ─────────────────────────────────────────────────────────────────────────────
 const MAX_ROAD_TILES = 900;
@@ -1343,8 +1863,29 @@ scene.add(roadMesh);
 
 let _roadVCount = -1;
 let _roadTimer  = 0;
+const roadBridges = []; // bridges spanning water along roads (separate from villager-built ones)
+
+function clearRoadBridges() {
+  for (const b of roadBridges) { scene.remove(b); b.geometry.dispose(); }
+  roadBridges.length = 0;
+}
+
+function addRoadBridge(x1, z1, x2, z2) {
+  const dx = x2 - x1, dz = z2 - z1;
+  const len = Math.sqrt(dx*dx + dz*dz);
+  if (len < 0.5) return;
+  const geo = new THREE.BoxGeometry(3.4, 0.4, len);
+  const bridge = new THREE.Mesh(geo, BRIDGE_MAT);
+  bridge.position.set((x1 + x2) * 0.5, G_SEA_LEVEL + 0.5, (z1 + z2) * 0.5);
+  bridge.rotation.y = Math.atan2(dx, dz);
+  bridge.castShadow = true;
+  scene.add(bridge);
+  roadBridges.push(bridge);
+}
+
 function rebuildRoads() {
   for (let i = 0; i < MAX_ROAD_TILES; i++) roadMesh.setMatrixAt(i, _hideRoad);
+  clearRoadBridges();
   const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1);
   let idx = 0;
   for (let i = 0; i < villageLocations.length; i++) {
@@ -1359,16 +1900,39 @@ function rebuildRoads() {
     if (!near || nd > 4000 * 4000) continue;
     const dist = Math.sqrt(nd);
     const segs = Math.min(140, dist / 4.5 | 0);
-    for (let k = 0; k < segs; k++) {
-      if (idx >= MAX_ROAD_TILES) break;
+
+    // Sample once; classify each sample as dry / wet
+    const samples = [];
+    for (let k = 0; k <= segs; k++) {
       const t = k / segs;
       const wx = a.wx + (near.wx - a.wx) * t;
       const wz = a.wz + (near.wz - a.wz) * t;
       const wy = getHeight(wx, wz);
-      if (wy < G_SEA_LEVEL) continue;
-      p.set(wx, wy + 0.1, wz);
-      m4.compose(p, q, s);
-      roadMesh.setMatrixAt(idx++, m4);
+      samples.push({ wx, wz, wy, wet: wy < G_SEA_LEVEL });
+    }
+
+    // Walk through samples. Dry → road tile. A run of wet samples → one bridge
+    // spanning the last dry shore to the next dry shore (so no tiles ever enter water).
+    let k = 0;
+    while (k < samples.length) {
+      if (!samples[k].wet) {
+        if (idx < MAX_ROAD_TILES) {
+          p.set(samples[k].wx, samples[k].wy + 0.1, samples[k].wz);
+          m4.compose(p, q, s);
+          roadMesh.setMatrixAt(idx++, m4);
+        }
+        k++;
+      } else {
+        // Find the next dry sample
+        let j = k;
+        while (j < samples.length && samples[j].wet) j++;
+        if (j >= samples.length) break; // ends in water — drop the trailing leg
+        // Last dry on this side (or first sample if water starts immediately)
+        const shoreA = samples[k > 0 ? k - 1 : k];
+        const shoreB = samples[j];
+        addRoadBridge(shoreA.wx, shoreA.wz, shoreB.wx, shoreB.wz);
+        k = j; // continue placing tiles from the far shore
+      }
     }
   }
   roadMesh.instanceMatrix.needsUpdate = true;
@@ -1583,6 +2147,29 @@ function _initWorker() {
 }
 for (let i = 0; i < NUM_WORKERS; i++) workers.push(_initWorker());
 
+// Guarantee a starting village near the player on land.
+(function spawnStartVillage() {
+  const step = 80;
+  for (let ring = 0; ring <= 12; ring++) {
+    for (let dx = -ring; dx <= ring; dx++) {
+      for (let dz = -ring; dz <= ring; dz++) {
+        if (Math.abs(dx) !== ring && Math.abs(dz) !== ring) continue; // only shell
+        const wx = dx * step, wz = dz * step;
+        if (!canFoundVillage(wx, wz)) continue;
+        const cx = Math.floor(wx / CHUNK_SIZE);
+        const cz = Math.floor(wz / CHUNK_SIZE);
+        const key = cKey(cx, cz);
+        const seed = (Math.imul(cx, 99991) + cz) | 0;
+        buildVillageAt(wx, wz, seed, key).forEach(m => scene.add(m));
+        villageLocations.push({ wx, wz, key });
+        const v0 = { wx, wz, key };
+        for (let i = 0; i < VILLAGER_PER_VILLAGE; i++) spawnVillager(v0);
+        return;
+      }
+    }
+  }
+})();
+
 function reinitWorkers() {
   // Bump generation so any in-flight responses are discarded.
   _workerGen++;
@@ -1627,8 +2214,10 @@ function onChunkBuilt(msg) {
   if (res === 72) {
     const vill = findVillageForChunk(cx, cz);
     if (vill) {
-      buildVillageAt(vill.wx, vill.wz, vill.seed).forEach(m => { scene.add(m); trees.push(m); });
+      buildVillageAt(vill.wx, vill.wz, vill.seed, key).forEach(m => { scene.add(m); trees.push(m); });
       villageLocations.push({ wx: vill.wx, wz: vill.wz, key });
+      const newVillage = { wx: vill.wx, wz: vill.wz, key };
+      for (let i = 0; i < VILLAGER_PER_VILLAGE; i++) spawnVillager(newVillage);
     }
     const ruin = findRuinForChunk(cx, cz);
     if (ruin) {
@@ -1691,6 +2280,9 @@ function removeChunk(key) {
     if (villageLocations[i].key === key) villageLocations.splice(i, 1);
   for (let i = ruinLocations.length - 1; i >= 0; i--)
     if (ruinLocations[i].key === key) ruinLocations.splice(i, 1);
+  // Despawn villagers belonging to this chunk's village
+  for (const v of villagers) if (v.homeKey === key) despawnVillager(v);
+  obstacles.delete(key);
   for (let i = lakeLocations.length - 1; i >= 0; i--)
     if (lakeLocations[i].key === key) lakeLocations.splice(i, 1);
 }
@@ -2099,9 +2691,14 @@ function animate(t) {
     waterMesh.position.x -= ox; waterMesh.position.z -= oz;
     rainMesh.position.x  -= ox; rainMesh.position.z  -= oz;
     for (const a of animals) { a.x -= ox; a.z -= oz; }
+    for (const v of villagers) { v.x -= ox; v.z -= oz; v.homeX -= ox; v.homeZ -= oz; }
+    for (const b of bridges) { b.position.x -= ox; b.position.z -= oz; }
+    for (const b of roadBridges) { b.position.x -= ox; b.position.z -= oz; }
     for (const v of villageLocations) { v.wx -= ox; v.wz -= oz; }
     for (const r of ruinLocations)    { r.wx -= ox; r.wz -= oz; }
     for (const l of lakeLocations)    { l.wx -= ox; l.wz -= oz; }
+    // Shift obstacle map keys aren't world coords, just the {x,z} entries
+    for (const arr of obstacles.values()) for (const o of arr) { o.x -= ox; o.z -= oz; }
     _roadVCount = -1; // force road rebuild
   }
 
@@ -2117,6 +2714,7 @@ function animate(t) {
   updateWeather(dt);
   updateClouds(dt);
   updateAnimals(dt);
+  updateVillagers(dt);
   updateRoads(dt);
 
   waterMesh.position.x = camera.position.x;
@@ -2148,7 +2746,7 @@ function animate(t) {
 
   genInd.textContent = buildQueue.length > 0
     ? `Generating... (${buildQueue.length} chunks)`
-    : `${chunkCache.size} chunks · ${villageLocations.length}V · ${ruinLocations.length}R · ${lakeLocations.length}L · ${animals.length} animals (🍖 ${stats.eaten})`;
+    : `${chunkCache.size} chunks · ${villageLocations.length}V · ${ruinLocations.length}R · ${lakeLocations.length}L · ${animals.length}🐺 ${villagers.length}🧍 (🍖${stats.eaten} 🏹${villagerStats.caught} 🏘️+${villagerStats.founded} 🌉${villagerStats.bridges})`;
 
   renderer.render(scene, camera);
 }

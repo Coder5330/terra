@@ -2895,13 +2895,15 @@ const _audio = (() => {
   function init() {
     nodes.rain  = makeNoise('n', 'lowpass',  400);
     nodes.storm = makeNoise('n', 'lowpass',  200);
-    nodes.wind  = makeNoise('n', 'bandpass', 320, 0.4);
-    // LFO for wind howl
+    // Wind: use <audio> element so it works on file:// without fetch
     const c = getCtx();
-    const lfo = c.createOscillator(); lfo.frequency.value = 0.18;
-    const lfoGain = c.createGain(); lfoGain.gain.value = 140;
-    lfo.connect(lfoGain); lfoGain.connect(nodes.wind.filt.frequency);
-    lfo.start();
+    const windEl = new Audio('assets/wind.mp3');
+    windEl.loop = true; windEl.crossOrigin = 'anonymous';
+    const windSrc  = c.createMediaElementSource(windEl);
+    const windGain = c.createGain(); windGain.gain.value = 0;
+    windSrc.connect(windGain); windGain.connect(c.destination);
+    windEl.play().catch(() => {});
+    nodes.wind = { gain: windGain };
     nodes._birdsTimer = 0;
     nodes._ready = true;
   }
@@ -2937,13 +2939,15 @@ const _audio = (() => {
     nodes._birdsTimer -= dt;
     if (nodes._birdsTimer <= 0 && _birdVol > 0.1) {
       nodes._birdsTimer = 1.5 + Math.random() * 3;
+      const ac = getCtx();
+      const now = ac.currentTime;
       const numChirps = 2 + Math.floor(Math.random() * 4);
       for (let i = 0; i < numChirps; i++) {
-        const osc = c.createOscillator();
-        const g   = c.createGain();
-        osc.connect(g); g.connect(c.destination);
+        const osc = ac.createOscillator();
+        const g   = ac.createGain();
+        osc.connect(g); g.connect(ac.destination);
         const baseFreq = 1200 + Math.random() * 1600;
-        const startT   = t + i * (0.08 + Math.random() * 0.12);
+        const startT   = now + i * (0.08 + Math.random() * 0.12);
         const dur      = 0.06 + Math.random() * 0.1;
         osc.frequency.setValueAtTime(baseFreq, startT);
         osc.frequency.linearRampToValueAtTime(baseFreq * (1.1 + Math.random() * 0.3), startT + dur);

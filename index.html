@@ -2904,6 +2904,2955 @@ const _audio = (() => {
     windSrc.connect(windGain); windGain.connect(c.destination);
     windEl.play().catch(() => {});
     nodes.wind = { gain: windGain };
+    // Birds: looping soft ambience + occasional loud call
+    const ac2 = getCtx();
+    function makeMediaNode(src) {
+      const el = new Audio(src); el.loop = true;
+      const s = ac2.createMediaElementSource(el);
+      const g = ac2.createGain(); g.gain.value = 0;
+      s.connect(g); g.connect(ac2.destination);
+      el.play().catch(() => {});
+      return { el, gain: g };
+    }
+    nodes.birdSoft = makeMediaNode('assets/birdsoft.mp3');
+    nodes.birdLoud = makeMediaNode('assets/birdloud.mp3');
+    nodes.waves    = makeMediaNode('assets/waves.mp3');
+    nodes._birdsTimer = 4 + Math.random() * 6;
+    nodes._loudTimer  = 20 + Math.random() * 30; // loud call every 20-50s
+    nodes._ready = true;
+  }
+
+  let _birdVol = 0;
+
+  function tick(dt) {
+    if (!nodes._ready) return;
+    const smooth = dt * 1.2;
+
+    const isRain  = weather === 'rain';
+    const isStorm = weather === 'storm';
+    const bio     = getBiome(camera.position.x, camera.position.z).name;
+    const isForest   = bio === 'forest' || bio === 'jungle';
+    const isMountain = bio === 'mountains';
+    const isClear    = weather === 'clear' || weather === 'cloudy';
+
+    const tRain  = isRain  ? 0.18 * weatherBlend : 0;
+    const tStorm = isStorm ? 0.28 * weatherBlend : 0;
+    const tWind  = isMountain ? 0.22 : (isStorm ? 0.15 * weatherBlend : 0);
+    _birdVol += ((isForest && isClear ? 1 : 0) - _birdVol) * smooth * 0.05;
+
+    if (!nodes._g) nodes._g = { rain: 0, storm: 0, wind: 0 };
+    const G = nodes._g;
+    G.rain  += (tRain  - G.rain)  * smooth;
+    G.storm += (tStorm - G.storm) * smooth;
+    G.wind  += (tWind  - G.wind)  * smooth * 0.6;
+    nodes.rain.gain.gain.value  = G.rain;
+    nodes.storm.gain.gain.value = G.storm;
+    nodes.wind.gain.gain.value  = G.wind;
+
+    // Waves: fade in when close to sea level
+    const groundH = getHeight(camera.position.x, camera.position.z);
+    const nearSea = Math.max(0, 1 - (groundH - G_SEA_LEVEL) / 18);
+    if (!nodes._g.waves) nodes._g.waves = 0;
+    nodes._g.waves += (nearSea * 0.7 - nodes._g.waves) * smooth * 0.4;
+    nodes.waves.gain.gain.value = nodes._g.waves;
+
+    // Soft bird ambience: fade in/out with birdVol
+    nodes.birdSoft.gain.gain.value = _birdVol * 0.55;
+
+    // Loud bird call: occasional one-shot (restart loop position to trigger)
+    nodes._loudTimer -= dt;
+    if (nodes._loudTimer <= 0 && _birdVol > 0.3) {
+      nodes._loudTimer = 20 + Math.random() * 35;
+      nodes.birdLoud.gain.gain.value = 0.7 * _birdVol;
+      nodes.birdLoud.el.currentTime = 0;
+      // Fade it back out after 4s
+      setTimeout(() => {
+        nodes.birdLoud.gain.gain.value = 0;
+      }, 4000);
+    }
+  }
+
+  return { init, tick };
+})();
+
+// Start audio on first user interaction
+window.addEventListener('click', () => { _audio.init(); }, { once: true });
+window.addEventListener('keydown', () => { _audio.init(); }, { once: true });
+
+animate(0);
+</script>
+</body>
+</html>
+#hud {
+  position: fixed; bottom: 18px; left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.8);
+  font-family: 'Courier New', monospace;
+  font-size: 12px; text-align: center;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+  pointer-events: none; z-index: 10; letter-spacing: 1px;
+}
+#genindicator {
+  position: fixed; top: 14px; right: 14px;
+  color: rgba(255,255,255,0.45);
+  font-family: monospace; font-size: 11px;
+  pointer-events: none; z-index: 10;
+}
+#crosshair {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none; z-index: 10;
+  width: 0; height: 0;
+}
+#minimap {
+  position: fixed; top: 14px; left: 14px;
+  width: 200px; height: 200px;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+  pointer-events: none; z-index: 10;
+  overflow: hidden;
+}
+#minimap canvas { display: block; width: 200px; height: 200px; image-rendering: pixelated; }
+#mm-label {
+  position: fixed; top: 218px; left: 14px;
+  color: rgba(255,255,255,0.55); font-family: monospace;
+  font-size: 10px; pointer-events: none; z-index: 10; letter-spacing: 1px;
+}
+#mm-layers {
+  position: fixed; top: 234px; left: 14px;
+  display: flex; flex-wrap: wrap; gap: 4px; width: 200px; z-index: 10;
+}
+#mm-layers button {
+  padding: 2px 7px; font-family: monospace; font-size: 9px; letter-spacing: 1px;
+  background: rgba(10,14,26,0.75); border: 1px solid rgba(255,255,255,0.18);
+  color: rgba(255,255,255,0.5); border-radius: 2px; cursor: pointer; transition: all 0.12s;
+}
+#mm-layers button:hover  { color: #fff; border-color: rgba(255,255,255,0.5); }
+#mm-layers button.active { color: #adf; border-color: #6ca0c8; background: rgba(108,160,200,0.18); }
+#crosshair::before, #crosshair::after {
+  content: ''; position: absolute;
+  background: rgba(255,255,255,0.8);
+  box-shadow: 0 0 4px rgba(0,0,0,0.7);
+}
+#crosshair::before { width: 1px; height: 20px; left: 0; top: -10px; }
+#crosshair::after  { width: 20px; height: 1px; left: -10px; top: 0; }
+
+/* ── Settings Panel ─────────────────────────────────────────────────────── */
+#panel {
+  position: fixed; top: 0; right: -340px; width: 320px; height: 100%;
+  background: rgba(10,14,26,0.93); backdrop-filter: blur(8px);
+  border-left: 1px solid rgba(255,255,255,0.1);
+  color: #ccc; font-family: 'Courier New', monospace; font-size: 12px;
+  z-index: 200; overflow-y: auto; padding: 20px 18px 40px;
+  transition: right 0.25s ease; pointer-events: all;
+}
+#panel.open { right: 0; }
+#panel h2 { color: #e8dcc8; font-size: 14px; letter-spacing: 3px; margin-bottom: 18px; }
+#panel h3 { color: rgba(255,255,255,0.4); font-size: 10px; letter-spacing: 2px;
+            text-transform: uppercase; margin: 18px 0 10px; border-top: 1px solid rgba(255,255,255,0.07);
+            padding-top: 12px; }
+#panel label { display: block; margin-bottom: 2px; opacity: 0.7; }
+#panel input[type=range] { width: 100%; accent-color: #6ca0c8; margin-bottom: 10px; cursor: pointer; }
+#panel input[type=number], #panel input[type=text] {
+  width: 100%; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+  color: #eee; padding: 5px 8px; border-radius: 3px; font-family: monospace;
+  margin-bottom: 8px; box-sizing: border-box;
+}
+#panel .row { display: flex; gap: 8px; margin-bottom: 10px; }
+#panel button {
+  flex: 1; padding: 7px; background: rgba(108,160,200,0.2); border: 1px solid rgba(108,160,200,0.4);
+  color: #aaccee; border-radius: 3px; cursor: pointer; font-family: monospace; font-size: 11px;
+  letter-spacing: 1px; transition: background 0.15s;
+}
+#panel button:hover { background: rgba(108,160,200,0.38); }
+#panel button.danger { background: rgba(200,80,60,0.18); border-color: rgba(200,80,60,0.4); color: #e88; }
+#panel button.danger:hover { background: rgba(200,80,60,0.35); }
+#panel .val { float: right; opacity: 0.55; }
+#panel-tab {
+  position: fixed; top: 50%; right: 0; transform: translateY(-50%);
+  background: rgba(10,14,26,0.8); border: 1px solid rgba(255,255,255,0.1);
+  border-right: none; color: rgba(255,255,255,0.5); writing-mode: vertical-rl;
+  padding: 12px 6px; border-radius: 4px 0 0 4px; cursor: pointer; z-index: 199;
+  font-family: monospace; font-size: 11px; letter-spacing: 2px; transition: color 0.15s;
+}
+#panel-tab:hover { color: #fff; }
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <h1>TERRA</h1>
+  <div class="sub">INFINITE WORLD EXPLORER</div>
+  <div class="cta">Click to begin exploring</div>
+  <div class="keys">
+    W A S D — Move &nbsp;|&nbsp; Shift — Sprint &nbsp;|&nbsp; Mouse — Look<br>
+    Space — Ascend &nbsp;|&nbsp; Ctrl — Descend &nbsp;|&nbsp; F — Fly / Walk<br>
+    <span style="opacity:0.5">Tab — Settings Panel</span>
+  </div>
+</div>
+
+<div id="panel-tab" onclick="togglePanel()">SETTINGS</div>
+
+<div id="panel">
+  <h2>⚙ WORLD SETTINGS</h2>
+
+  <h3>World Generation <span style="opacity:.4">(Tab to close)</span></h3>
+  <label>Seed <span class="val" id="seed-val"></span></label>
+  <input type="text" id="p-seed" placeholder="0 – 999999999">
+  <div class="row">
+    <button onclick="document.getElementById('p-seed').value=Math.random()*1e9|0">🎲 Random</button>
+  </div>
+
+  <label>Height Scale <span class="val" id="h-val">1.0</span></label>
+  <input type="range" id="p-height" min="0.2" max="3" step="0.05" value="1">
+
+  <label>Mountain Ridge <span class="val" id="r-val">1.0</span></label>
+  <input type="range" id="p-ridge" min="0.1" max="3" step="0.05" value="1">
+
+  <label>Hill Amplitude <span class="val" id="hl-val">1.0</span></label>
+  <input type="range" id="p-hill" min="0.1" max="3" step="0.05" value="1">
+
+  <label>Biome Size <span class="val" id="b-val">1.0</span></label>
+  <input type="range" id="p-biome" min="0.3" max="4" step="0.1" value="1">
+
+  <label>Erosion <span class="val" id="er-val">1.0</span></label>
+  <input type="range" id="p-erode" min="0" max="3" step="0.05" value="1">
+
+  <div class="row">
+    <button class="danger" onclick="applyWorld()">↺ Rebuild World</button>
+    <button onclick="shareWorld()" style="flex:1">🔗 Copy URL</button>
+  </div>
+
+  <h3>Live — No Rebuild</h3>
+  <label>Sea Level <span class="val" id="sl-val">6</span></label>
+  <input type="range" id="p-sea" min="-30" max="60" step="1" value="6">
+
+  <h3>Player</h3>
+  <label>Move Speed <span class="val" id="sp-val">38</span></label>
+  <input type="range" id="p-speed" min="5" max="250" step="1" value="38">
+
+  <h3>Weather</h3>
+  <div class="row" style="flex-wrap:wrap;gap:5px">
+    <button class="wx-btn active" data-wx="clear"  onclick="setWeather('clear')">☀ Clear</button>
+    <button class="wx-btn"        data-wx="cloudy" onclick="setWeather('cloudy')">☁ Cloudy</button>
+    <button class="wx-btn"        data-wx="rain"   onclick="setWeather('rain')">🌧 Rain</button>
+    <button class="wx-btn"        data-wx="storm"  onclick="setWeather('storm')">⛈ Storm</button>
+  </div>
+
+  <h3>Time &amp; Sky</h3>
+  <label>Day Speed <span class="val" id="ds-val">0.008</span></label>
+  <input type="range" id="p-dayspeed" min="0" max="0.1" step="0.001" value="0.008">
+
+  <label>Time of Day <span class="val" id="td-val">0.28</span></label>
+  <input type="range" id="p-time" min="0" max="1" step="0.01" value="0.28">
+
+  <div class="row">
+    <button id="btn-pause" onclick="togglePause()">⏸ Pause Time</button>
+  </div>
+</div>
+
+<div id="minimap"><canvas id="mm" width="100" height="100"></canvas></div>
+<div id="mm-label">OVERVIEW</div>
+<div id="mm-layers">
+  <button class="active" onclick="setMMLayer('terrain',this)">Terrain</button>
+  <button onclick="setMMLayer('vegetation',this)">Flora</button>
+  <button onclick="setMMLayer('contours',this)">Contours</button>
+  <button onclick="setMMLayer('elevation',this)">Elevation</button>
+  <button onclick="setMMLayer('biomes',this)">Biomes</button>
+</div>
+<div id="crosshair"></div>
+<div id="hud">Generating world...</div>
+<div id="genindicator"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+
+<!-- TERRAIN WORKER SOURCE — not executed directly; main thread reads .textContent
+     and creates a Blob URL Worker so it works from file:// URLs (no THREE.js here). -->
+<script id="terrain-worker-src" type="text/world-worker">
+'use strict';
+const _G3X = new Int8Array([1,-1, 1,-1, 1,-1, 1,-1, 0, 0, 0, 0]);
+const _G3Y = new Int8Array([1, 1,-1,-1, 0, 0, 0, 0, 1,-1, 1,-1]);
+const _F2  = 0.3660254037844386;
+const _G2  = 0.21132486540518713;
+
+class SimplexNoise {
+  constructor(seed) {
+    seed = seed | 0 || 0xdeadbeef;
+    const p = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) p[i] = i;
+    let s = seed;
+    for (let i = 255; i > 0; i--) {
+      s = (Math.imul(s, 1664525) + 1013904223) | 0;
+      const j = (s >>> 0) % (i + 1);
+      const t = p[i]; p[i] = p[j]; p[j] = t;
+    }
+    this.perm = new Uint8Array(512);
+    this.pm12 = new Uint8Array(512);
+    for (let i = 0; i < 512; i++) {
+      this.perm[i] = p[i & 255];
+      this.pm12[i] = this.perm[i] % 12;
+    }
+  }
+  noise2D(x, y) {
+    const F2 = _F2, G2 = _G2;
+    const g3x = _G3X, g3y = _G3Y;
+    const { perm, pm12 } = this;
+    const s  = (x + y) * F2;
+    const i  = Math.floor(x + s);
+    const j  = Math.floor(y + s);
+    const t  = (i + j) * G2;
+    const x0 = x - (i - t);
+    const y0 = y - (j - t);
+    const i1 = x0 > y0 ? 1 : 0;
+    const j1 = x0 > y0 ? 0 : 1;
+    const x1 = x0 - i1 + G2,  y1 = y0 - j1 + G2;
+    const x2 = x0 - 1 + 2*G2, y2 = y0 - 1 + 2*G2;
+    const ii = i & 255, jj = j & 255;
+    const gi0 = pm12[ii +      perm[jj     ]];
+    const gi1 = pm12[ii + i1 + perm[jj + j1]];
+    const gi2 = pm12[ii +  1 + perm[jj +  1]];
+    let t0 = 0.5 - x0*x0 - y0*y0, n0 = 0;
+    if (t0 >= 0) { t0 *= t0; n0 = t0*t0*(g3x[gi0]*x0 + g3y[gi0]*y0); }
+    let t1 = 0.5 - x1*x1 - y1*y1, n1 = 0;
+    if (t1 >= 0) { t1 *= t1; n1 = t1*t1*(g3x[gi1]*x1 + g3y[gi1]*y1); }
+    let t2 = 0.5 - x2*x2 - y2*y2, n2 = 0;
+    if (t2 >= 0) { t2 *= t2; n2 = t2*t2*(g3x[gi2]*x2 + g3y[gi2]*y2); }
+    return 70 * (n0 + n1 + n2);
+  }
+}
+
+// Per-build params (set on each 'build' message)
+let G_HEIGHT, G_RIDGE, G_HILL, G_BIOME, G_ERODE, G_SEA_LEVEL;
+// Persistent (set on 'init')
+let CHUNK_SIZE, SKIRT_DROP;
+let sn1, sn2, sn3, snRiver, snBiomeT, snBiomeM;
+
+function fbm(sn, x, z, oct, pers, lac) {
+  let v = 0, a = 1, f = 1, m = 0;
+  for (let o = 0; o < oct; o++) {
+    v += sn.noise2D(x * f, z * f) * a;
+    m += a; a *= pers; f *= lac;
+  }
+  return v / m;
+}
+function ridgeFbm(sn, x, z, oct) {
+  let v = 0, a = 1, f = 1, m = 0;
+  for (let o = 0; o < oct; o++) {
+    const n = sn.noise2D(x * f, z * f);
+    v += (1 - Math.abs(n)) * a;
+    m += a; a *= 0.5; f *= 2.1;
+  }
+  return v / m;
+}
+
+const BIOME_PARAMS = {
+  mountains: { ridgeW: 1.55, hillW: 0.30, riverW: 0.4,  maxH: 230 },
+  desert:    { ridgeW: 0.08, hillW: 0.28, riverW: 0.1,  maxH: 72  },
+  jungle:    { ridgeW: 0.48, hillW: 0.82, riverW: 1.3,  maxH: 115 },
+  forest:    { ridgeW: 0.72, hillW: 0.58, riverW: 1.0,  maxH: 148 },
+  flatland:  { ridgeW: 0.05, hillW: 0.14, riverW: 1.6,  maxH: 56  },
+};
+function getBiome(wx, wz) {
+  const bsc = 0.00026 / G_BIOME;
+  const temp  = snBiomeT.noise2D(wx * bsc,      wz * bsc)       * 0.5 + 0.5;
+  const moist = snBiomeM.noise2D(wx * bsc + 60, wz * bsc + 40)  * 0.5 + 0.5;
+  let name;
+  if      (temp < 0.30)                       name = 'mountains';
+  else if (temp > 0.65 && moist < 0.38)       name = 'desert';
+  else if (temp > 0.58 && moist > 0.60)       name = 'jungle';
+  else if (moist > 0.52)                      name = 'forest';
+  else                                        name = 'flatland';
+  return { name, ...BIOME_PARAMS[name] };
+}
+
+function getHeight(wx, wz) {
+  const sc = 0.00085;
+  const nx = wx * sc, nz = wz * sc;
+  const bio = getBiome(wx, wz);
+  const wx1 = nx + fbm(sn3, nx + 0.0, nz + 0.0, 4, 0.5, 2.0) * 0.9;
+  const wz1 = nz + fbm(sn3, nx + 5.2, nz + 1.3, 4, 0.5, 2.0) * 0.9;
+  const continent = fbm(sn1, wx1 * 0.25, wz1 * 0.25, 5, 0.55, 2.0);
+  const landMask = Math.max(0, continent * 1.2 + 0.15);
+  const ridge = ridgeFbm(sn2, wx1 * 1.4, wz1 * 1.4, 6);
+  const mountaininess = Math.pow(Math.max(0, landMask), 1.6);
+  const hills = fbm(sn1, wx1 * 4.0, wz1 * 4.0, 4, 0.5, 2.0) * 0.5 + 0.5;
+  const detail = fbm(sn3, nx * 22, nz * 22, 2, 0.5, 2.0) * 0.04;
+  const rsc = 0.0012;
+  const riverBase = snRiver.noise2D(wx * rsc, wz * rsc);
+  const riverMod  = snRiver.noise2D(wx * rsc * 3.5, wz * rsc * 3.5 + 100);
+  const riverFlow  = Math.sin(riverBase * Math.PI * 1.8 + riverMod * 0.6);
+  const riverCarve = Math.max(0, (0.78 - Math.abs(riverFlow))) * 0.18;
+  let h = 0;
+  h += landMask * 0.35;
+  h += ridge * mountaininess * 0.55 * bio.ridgeW * G_RIDGE;
+  h += hills * (1 - mountaininess * 0.6) * 0.22 * bio.hillW * G_HILL;
+  h += detail;
+  h -= riverCarve * (1 - mountaininess * 0.5) * bio.riverW;
+  const baseH = (h - 0.12) * bio.maxH * G_HEIGHT;
+  const gullyN  = snRiver.noise2D(wx1 * 9.0 + 3.7, wz1 * 9.0 - 2.1);
+  const gullyT  = Math.max(0, (0.30 - Math.abs(gullyN)) / 0.30);
+  const gullyDepth = gullyT * gullyT * 28 * G_ERODE;
+  const aboveSea   = Math.max(0, baseH - G_SEA_LEVEL - 2);
+  const shoreFade  = Math.min(1, aboveSea / 10);
+  const gullyMask  = Math.max(0, landMask) * (1 - mountaininess * 0.55);
+  const wearN    = sn2.noise2D(wx1 * 20.0, wz1 * 20.0) * 0.5 + 0.5;
+  const ridgeWear = Math.pow(wearN, 0.5) * ridge * mountaininess * 20 * G_ERODE;
+  const talusN = fbm(sn3, wx1 * 4.8, wz1 * 4.8, 2, 0.5, 2.0) * 0.5 + 0.5;
+  const talus  = talusN * mountaininess * (1.0 - ridge) * 10 * G_ERODE;
+  return baseH - gullyDepth * gullyMask * shoreFade - ridgeWear + talus;
+}
+
+// Colors as [r,g,b] tuples (THREE.Color isn't available in workers)
+function lerp3(a, b, t) {
+  t = Math.max(0, Math.min(1, t));
+  return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
+}
+const COL_DEEP_WATER = [0.06, 0.18, 0.35];
+const COL_SAND       = [0.84, 0.77, 0.52];
+const COL_WET_SAND   = [0.71, 0.65, 0.42];
+const COL_FOREST     = [0.15, 0.32, 0.12];
+const COL_SUBALPINE  = [0.32, 0.34, 0.22];
+const COL_ROCK_LO    = [0.52, 0.48, 0.40];
+const COL_ROCK_HI    = [0.68, 0.65, 0.60];
+const COL_SNOW       = [0.93, 0.94, 0.96];
+const COL_STEEP_ROCK = [0.44, 0.40, 0.34];
+
+function getColor(h, slope, wx, wz) {
+  const jitter = sn1.noise2D(wx * 0.08, wz * 0.08) * 0.05;
+  const hj = h + jitter * 8;
+  const biome = getBiome(wx, wz).name;
+  let c;
+  if (hj < G_SEA_LEVEL - 2) {
+    c = COL_DEEP_WATER.slice();
+  } else if (hj < G_SEA_LEVEL + 2) {
+    const sandCol = biome === 'desert' ? [0.88, 0.78, 0.52]
+                  : biome === 'jungle' ? [0.68, 0.64, 0.38]
+                  : COL_SAND;
+    c = lerp3(COL_WET_SAND, sandCol, (hj - G_SEA_LEVEL + 2) / 4);
+  } else {
+    switch (biome) {
+      case 'mountains':
+        if      (hj < 55)  c = lerp3([0.26,0.46,0.16], [0.20,0.36,0.12], (hj-G_SEA_LEVEL-2)/50);
+        else if (hj < 95)  c = lerp3([0.20,0.36,0.12], COL_SUBALPINE,    (hj-55)/40);
+        else if (hj < 130) c = lerp3(COL_SUBALPINE, COL_ROCK_LO,         (hj-95)/35);
+        else if (hj < 160) c = lerp3(COL_ROCK_LO,   COL_ROCK_HI,         (hj-130)/30);
+        else               c = lerp3(COL_ROCK_HI,   COL_SNOW,    Math.min(1,(hj-160)/25));
+        break;
+      case 'desert':
+        if      (hj < 25)  c = [0.87, 0.77, 0.50];
+        else if (hj < 45)  c = lerp3([0.87,0.77,0.50], [0.78,0.58,0.36], (hj-25)/20);
+        else               c = lerp3([0.78,0.58,0.36], [0.62,0.42,0.26], Math.min(1,(hj-45)/20));
+        break;
+      case 'jungle':
+        if      (hj < 45)  c = [0.10, 0.38, 0.08];
+        else if (hj < 80)  c = lerp3([0.10,0.38,0.08], [0.08,0.28,0.07], (hj-45)/35);
+        else if (hj < 108) c = lerp3([0.08,0.28,0.07], [0.30,0.27,0.16], (hj-80)/28);
+        else               c = lerp3([0.30,0.27,0.16], [0.44,0.40,0.32], Math.min(1,(hj-108)/18));
+        break;
+      case 'forest':
+        if      (hj < 50)  c = lerp3([0.28,0.52,0.16], COL_FOREST,        (hj-G_SEA_LEVEL-2)/46);
+        else if (hj < 95)  c = lerp3(COL_FOREST, COL_SUBALPINE,           (hj-50)/45);
+        else if (hj < 130) c = lerp3(COL_SUBALPINE, COL_ROCK_LO,          (hj-95)/35);
+        else               c = lerp3(COL_ROCK_LO, COL_SNOW,       Math.min(1,(hj-130)/30));
+        break;
+      case 'flatland':
+      default:
+        if      (hj < 28)  c = [0.40, 0.66, 0.20];
+        else if (hj < 48)  c = lerp3([0.40,0.66,0.20], [0.30,0.54,0.16], (hj-28)/20);
+        else               c = lerp3([0.30,0.54,0.16], COL_ROCK_LO, Math.min(1,(hj-48)/18));
+        break;
+    }
+  }
+  if (slope > 0.55 && h > G_SEA_LEVEL + 4 && biome !== 'desert') {
+    c = lerp3(c, COL_STEEP_ROCK, Math.min(1, (slope - 0.55) * 2.8) * 0.85);
+  }
+  const k = Math.max(0.72, 0.95 + jitter * 0.8);
+  return [c[0]*k, c[1]*k, c[2]*k];
+}
+
+const _idxCache = new Map();
+function getIndexBuffer(res) {
+  if (_idxCache.has(res)) return _idxCache.get(res);
+  const out = [];
+  for (let zi = 0; zi < res - 1; zi++)
+    for (let xi = 0; xi < res - 1; xi++) {
+      const a = zi*res+xi, b = a+1, c = a+res, d = c+1;
+      out.push(a,c,b, b,c,d);
+    }
+  const buf = new Uint32Array(out);
+  _idxCache.set(res, buf);
+  return buf;
+}
+
+function buildChunkData(cx, cz, res) {
+  const ox = cx * CHUNK_SIZE, oz = cz * CHUNK_SIZE;
+  const step = CHUNK_SIZE / (res - 1);
+  const H = new Float32Array(res * res);
+  for (let zi = 0; zi < res; zi++)
+    for (let xi = 0; xi < res; xi++)
+      H[zi * res + xi] = getHeight(ox + xi * step, oz + zi * step);
+
+  const skirtOff = res * res;
+  const totalV = skirtOff + 4 * res;
+  const positions = new Float32Array(totalV * 3);
+  const normals   = new Float32Array(totalV * 3);
+  const colors    = new Float32Array(totalV * 3);
+
+  for (let zi = 0; zi < res; zi++) {
+    for (let xi = 0; xi < res; xi++) {
+      const idx = zi * res + xi;
+      const h = H[idx];
+      const wx = ox + xi * step, wz = oz + zi * step;
+      positions[idx*3]   = wx;
+      positions[idx*3+1] = h;
+      positions[idx*3+2] = wz;
+      const hL = xi > 0       ? H[idx - 1]   : h;
+      const hR = xi < res - 1 ? H[idx + 1]   : h;
+      const hU = zi > 0       ? H[idx - res]  : h;
+      const hD = zi < res - 1 ? H[idx + res]  : h;
+      const dx = (hR - hL) / (2 * step);
+      const dz = (hD - hU) / (2 * step);
+      const invLen = 1 / Math.sqrt(dx*dx + 1 + dz*dz);
+      normals[idx*3]   = -dx * invLen;
+      normals[idx*3+1] =  invLen;
+      normals[idx*3+2] = -dz * invLen;
+      const slope = Math.sqrt(dx*dx + dz*dz) / (1 + Math.sqrt(dx*dx + dz*dz));
+      const c = getColor(h, slope, wx, wz);
+      colors[idx*3]   = c[0];
+      colors[idx*3+1] = c[1];
+      colors[idx*3+2] = c[2];
+    }
+  }
+
+  const edges = [
+    { gIdx: i => i,                 x: i => ox + i * step,   z: () => oz },
+    { gIdx: i => (res-1)*res + i,   x: i => ox + i * step,   z: () => oz + CHUNK_SIZE },
+    { gIdx: i => i * res,           x: () => ox,             z: i => oz + i * step },
+    { gIdx: i => i * res + res - 1, x: () => ox + CHUNK_SIZE, z: i => oz + i * step },
+  ];
+  edges.forEach((e, ei) => {
+    for (let i = 0; i < res; i++) {
+      const gv = e.gIdx(i);
+      const sv = skirtOff + ei * res + i;
+      positions[sv*3]   = e.x(i);
+      positions[sv*3+1] = H[gv] - SKIRT_DROP;
+      positions[sv*3+2] = e.z(i);
+      normals[sv*3]   = normals[gv*3];
+      normals[sv*3+1] = normals[gv*3+1];
+      normals[sv*3+2] = normals[gv*3+2];
+      colors[sv*3]   = colors[gv*3];
+      colors[sv*3+1] = colors[gv*3+1];
+      colors[sv*3+2] = colors[gv*3+2];
+    }
+  });
+
+  const gridIdx = getIndexBuffer(res);
+  const skirtN  = 4 * (res - 1) * 6;
+  const indices = new Uint32Array(gridIdx.length + skirtN);
+  indices.set(gridIdx);
+  let ip = gridIdx.length;
+  const push = (a,b,c) => { indices[ip++]=a; indices[ip++]=b; indices[ip++]=c; };
+  for (let i = 0; i < res - 1; i++) { const g0=i, g1=i+1, s0=skirtOff+i, s1=skirtOff+i+1; push(g0,g1,s0); push(g1,s1,s0); }
+  for (let i = 0; i < res - 1; i++) { const g0=(res-1)*res+i, g1=g0+1, s0=skirtOff+res+i, s1=s0+1; push(g0,s0,g1); push(g1,s0,s1); }
+  for (let i = 0; i < res - 1; i++) { const g0=i*res, g1=(i+1)*res, s0=skirtOff+2*res+i, s1=s0+1; push(g0,s0,g1); push(g1,s0,s1); }
+  for (let i = 0; i < res - 1; i++) { const g0=i*res+res-1, g1=g0+res, s0=skirtOff+3*res+i, s1=s0+1; push(g0,g1,s0); push(g1,s1,s0); }
+
+  return { positions, normals, colors, indices };
+}
+
+self.onmessage = function(e) {
+  const msg = e.data;
+  if (msg.type === 'init') {
+    CHUNK_SIZE  = msg.CHUNK_SIZE;
+    SKIRT_DROP  = msg.SKIRT_DROP;
+    const seed = msg.seed | 0;
+    sn1 = new SimplexNoise(seed);
+    sn2 = new SimplexNoise(seed + 7919);
+    sn3 = new SimplexNoise(seed + 15731);
+    snRiver  = new SimplexNoise(seed + 31337);
+    snBiomeT = new SimplexNoise(seed + 99991);
+    snBiomeM = new SimplexNoise(seed + 99973);
+    self.postMessage({ type: 'ready' });
+  } else if (msg.type === 'build') {
+    G_HEIGHT = msg.G_HEIGHT;
+    G_RIDGE  = msg.G_RIDGE;
+    G_HILL   = msg.G_HILL;
+    G_BIOME  = msg.G_BIOME;
+    G_ERODE  = msg.G_ERODE;
+    G_SEA_LEVEL = msg.G_SEA_LEVEL;
+    const d = buildChunkData(msg.cx, msg.cz, msg.res);
+    self.postMessage({
+      type: 'built',
+      jobId: msg.jobId, gen: msg.gen,
+      cx: msg.cx, cz: msg.cz, res: msg.res,
+      positions: d.positions, normals: d.normals,
+      colors: d.colors, indices: d.indices,
+    }, [d.positions.buffer, d.normals.buffer, d.colors.buffer, d.indices.buffer]);
+  }
+};
+</script>
+
+<script>
+'use strict';
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SIMPLEX NOISE  (Stefan Gustavson's 2D simplex noise)
+// ─────────────────────────────────────────────────────────────────────────────
+const _G3X = new Int8Array([1,-1, 1,-1, 1,-1, 1,-1, 0, 0, 0, 0]);
+const _G3Y = new Int8Array([1, 1,-1,-1, 0, 0, 0, 0, 1,-1, 1,-1]);
+const _F2  = 0.3660254037844386;
+const _G2  = 0.21132486540518713;
+
+class SimplexNoise {
+  constructor(seed) {
+    seed = seed | 0 || 0xdeadbeef;
+    const p = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) p[i] = i;
+    let s = seed;
+    for (let i = 255; i > 0; i--) {
+      s = (Math.imul(s, 1664525) + 1013904223) | 0;
+      const j = (s >>> 0) % (i + 1);
+      const t = p[i]; p[i] = p[j]; p[j] = t;
+    }
+    this.perm = new Uint8Array(512);
+    this.pm12 = new Uint8Array(512);
+    for (let i = 0; i < 512; i++) {
+      this.perm[i] = p[i & 255];
+      this.pm12[i] = this.perm[i] % 12;
+    }
+  }
+
+  noise2D(x, y) {
+    const F2 = _F2, G2 = _G2;
+    const g3x = _G3X, g3y = _G3Y;
+    const { perm, pm12 } = this;
+
+    const s  = (x + y) * F2;
+    const i  = Math.floor(x + s);
+    const j  = Math.floor(y + s);
+    const t  = (i + j) * G2;
+    const x0 = x - (i - t);
+    const y0 = y - (j - t);
+    const i1 = x0 > y0 ? 1 : 0;
+    const j1 = x0 > y0 ? 0 : 1;
+    const x1 = x0 - i1 + G2,  y1 = y0 - j1 + G2;
+    const x2 = x0 - 1 + 2*G2, y2 = y0 - 1 + 2*G2;
+    const ii = i & 255, jj = j & 255;
+    const gi0 = pm12[ii +      perm[jj     ]] ;
+    const gi1 = pm12[ii + i1 + perm[jj + j1]] ;
+    const gi2 = pm12[ii +  1 + perm[jj +  1]] ;
+
+    let t0 = 0.5 - x0*x0 - y0*y0, n0 = 0;
+    if (t0 >= 0) { t0 *= t0; n0 = t0*t0*(g3x[gi0]*x0 + g3y[gi0]*y0); }
+    let t1 = 0.5 - x1*x1 - y1*y1, n1 = 0;
+    if (t1 >= 0) { t1 *= t1; n1 = t1*t1*(g3x[gi1]*x1 + g3y[gi1]*y1); }
+    let t2 = 0.5 - x2*x2 - y2*y2, n2 = 0;
+    if (t2 >= 0) { t2 *= t2; n2 = t2*t2*(g3x[gi2]*x2 + g3y[gi2]*y2); }
+
+    return 70 * (n0 + n1 + n2);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  WORLD CONSTANTS & NOISE INSTANCES
+// ─────────────────────────────────────────────────────────────────────────────
+// Load from URL params if present
+const _qp = new URLSearchParams(location.search);
+let WORLD_SEED = _qp.has('seed') ? (parseInt(_qp.get('seed')) | 0) : (Math.random() * 1e9 | 0);
+let sn1      = new SimplexNoise(WORLD_SEED);
+let sn2      = new SimplexNoise(WORLD_SEED + 7919);
+let sn3      = new SimplexNoise(WORLD_SEED + 15731);
+let snRiver  = new SimplexNoise(WORLD_SEED + 31337);
+let snBiomeT = new SimplexNoise(WORLD_SEED + 99991);
+let snBiomeM = new SimplexNoise(WORLD_SEED + 99973);
+
+// ── Tweakable world params (rebuilt on Apply) ─────────────────────────────
+let G_HEIGHT  = _qp.has('h')  ? parseFloat(_qp.get('h'))  : 1.0;
+let G_RIDGE   = _qp.has('r')  ? parseFloat(_qp.get('r'))  : 1.0;
+let G_HILL    = _qp.has('hi') ? parseFloat(_qp.get('hi')) : 1.0;
+let G_BIOME   = _qp.has('b')  ? parseFloat(_qp.get('b'))  : 1.0;
+let G_ERODE   = _qp.has('e')  ? parseFloat(_qp.get('e'))  : 1.0;
+// ── Live params (no rebuild needed) ──────────────────────────────────────
+let G_SEA_LEVEL  = 6;    // water surface height (= SEA_LEVEL used elsewhere)
+let G_SPEED      = 38;   // base move speed
+let G_DAY_SPEED  = 0.008; // day cycles per real second
+let G_DAY_PAUSED = false;
+let G_DAY_TIME   = 0.28; // 0=midnight  0.25=dawn  0.5=noon  0.75=dusk
+
+const BIOME_PARAMS = {
+  mountains: { ridgeW: 1.55, hillW: 0.30, riverW: 0.4,  maxH: 230 },
+  desert:    { ridgeW: 0.08, hillW: 0.28, riverW: 0.1,  maxH: 72  },
+  jungle:    { ridgeW: 0.48, hillW: 0.82, riverW: 1.3,  maxH: 115 },
+  forest:    { ridgeW: 0.72, hillW: 0.58, riverW: 1.0,  maxH: 148 },
+  flatland:  { ridgeW: 0.05, hillW: 0.14, riverW: 1.6,  maxH: 56  },
+};
+
+function getBiome(wx, wz) {
+  const bsc = 0.00026 / G_BIOME;
+  const temp  = snBiomeT.noise2D(wx * bsc,      wz * bsc)       * 0.5 + 0.5;
+  const moist = snBiomeM.noise2D(wx * bsc + 60, wz * bsc + 40)  * 0.5 + 0.5;
+  let name;
+  if      (temp < 0.30)                       name = 'mountains';
+  else if (temp > 0.65 && moist < 0.38)       name = 'desert';
+  else if (temp > 0.58 && moist > 0.60)       name = 'jungle';
+  else if (moist > 0.52)                      name = 'forest';
+  else                                        name = 'flatland';
+  return { name, ...BIOME_PARAMS[name] };
+}
+
+const CHUNK_SIZE  = 420;   // world units
+const CHUNK_RES   = 72;    // vertices per edge
+const RENDER_DIST = 10;    // chunk radius — extended for impostor horizon
+const UNLOAD_DIST = 14;
+const MAX_HEIGHT  = 200;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  TERRAIN HEIGHT FUNCTION
+// ─────────────────────────────────────────────────────────────────────────────
+function fbm(sn, x, z, oct, pers, lac) {
+  let v = 0, a = 1, f = 1, m = 0;
+  for (let o = 0; o < oct; o++) {
+    v += sn.noise2D(x * f, z * f) * a;
+    m += a; a *= pers; f *= lac;
+  }
+  return v / m;
+}
+
+function ridgeFbm(sn, x, z, oct) {
+  let v = 0, a = 1, f = 1, m = 0;
+  for (let o = 0; o < oct; o++) {
+    const n = sn.noise2D(x * f, z * f);
+    v += (1 - Math.abs(n)) * a;
+    m += a; a *= 0.5; f *= 2.1;
+  }
+  return v / m;
+}
+
+function getHeight(wx, wz) {
+  const sc = 0.00085;
+  const nx = wx * sc, nz = wz * sc;
+
+  const bio = getBiome(wx, wz);
+
+  const wx1 = nx + fbm(sn3, nx + 0.0, nz + 0.0, 4, 0.5, 2.0) * 0.9;
+  const wz1 = nz + fbm(sn3, nx + 5.2, nz + 1.3, 4, 0.5, 2.0) * 0.9;
+
+  const continent = fbm(sn1, wx1 * 0.25, wz1 * 0.25, 5, 0.55, 2.0);
+  const landMask = Math.max(0, continent * 1.2 + 0.15);
+
+  const ridge = ridgeFbm(sn2, wx1 * 1.4, wz1 * 1.4, 6);
+  const mountaininess = Math.pow(Math.max(0, landMask), 1.6);
+
+  const hills = fbm(sn1, wx1 * 4.0, wz1 * 4.0, 4, 0.5, 2.0) * 0.5 + 0.5;
+  const detail = fbm(sn3, nx * 22, nz * 22, 2, 0.5, 2.0) * 0.04;
+
+  const rsc = 0.0012;
+  const riverBase = snRiver.noise2D(wx * rsc, wz * rsc);
+  const riverMod  = snRiver.noise2D(wx * rsc * 3.5, wz * rsc * 3.5 + 100);
+  const riverFlow  = Math.sin(riverBase * Math.PI * 1.8 + riverMod * 0.6);
+  const riverCarve = Math.max(0, (0.78 - Math.abs(riverFlow))) * 0.18;
+
+  let h = 0;
+  h += landMask * 0.35;
+  h += ridge * mountaininess * 0.55 * bio.ridgeW * G_RIDGE;
+  h += hills * (1 - mountaininess * 0.6) * 0.22 * bio.hillW * G_HILL;
+  h += detail;
+  h -= riverCarve * (1 - mountaininess * 0.5) * bio.riverW;
+
+  const baseH = (h - 0.12) * bio.maxH * G_HEIGHT;
+
+  // ── Erosion in world units (consistent depth regardless of biome maxH) ──────
+  // 1. Gully channels: V-shaped cuts. Up to 28 world units deep.
+  const gullyN  = snRiver.noise2D(wx1 * 9.0 + 3.7, wz1 * 9.0 - 2.1);
+  const gullyT  = Math.max(0, (0.30 - Math.abs(gullyN)) / 0.30);
+  const gullyDepth = gullyT * gullyT * 28 * G_ERODE;
+  const aboveSea   = Math.max(0, baseH - G_SEA_LEVEL - 2);
+  const shoreFade  = Math.min(1, aboveSea / 10); // taper off near water
+  const gullyMask  = Math.max(0, landMask) * (1 - mountaininess * 0.55);
+
+  // 2. Ridge weathering: up to 20 world units of peak crumbling.
+  const wearN    = sn2.noise2D(wx1 * 20.0, wz1 * 20.0) * 0.5 + 0.5;
+  const ridgeWear = Math.pow(wearN, 0.5) * ridge * mountaininess * 20 * G_ERODE;
+
+  // 3. Talus fans: material piles at mountain bases, up to 10 units of buildup.
+  const talusN = fbm(sn3, wx1 * 4.8, wz1 * 4.8, 2, 0.5, 2.0) * 0.5 + 0.5;
+  const talus  = talusN * mountaininess * (1.0 - ridge) * 10 * G_ERODE;
+  // ────────────────────────────────────────────────────────────────────────────
+
+  return baseH - gullyDepth * gullyMask * shoreFade - ridgeWear + talus;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  TERRAIN COLORING  (height + slope based, with subtle noise variation)
+// ─────────────────────────────────────────────────────────────────────────────
+const COL_DEEP_WATER  = new THREE.Color(0.06, 0.18, 0.35);
+const COL_WATER       = new THREE.Color(0.12, 0.32, 0.55);
+const COL_SAND        = new THREE.Color(0.84, 0.77, 0.52);
+const COL_WET_SAND    = new THREE.Color(0.71, 0.65, 0.42);
+const COL_GRASS_LO    = new THREE.Color(0.28, 0.52, 0.18);
+const COL_GRASS_HI    = new THREE.Color(0.22, 0.42, 0.14);
+const COL_FOREST      = new THREE.Color(0.15, 0.32, 0.12);
+const COL_SUBALPINE   = new THREE.Color(0.32, 0.34, 0.22);
+const COL_ROCK_LO     = new THREE.Color(0.52, 0.48, 0.40);
+const COL_ROCK_HI     = new THREE.Color(0.68, 0.65, 0.60);
+const COL_SNOW        = new THREE.Color(0.93, 0.94, 0.96);
+const COL_STEEP_ROCK  = new THREE.Color(0.44, 0.40, 0.34);
+
+function lerp3(a, b, t) {
+  const c = a.clone();
+  return c.lerp(b, Math.max(0, Math.min(1, t)));
+}
+
+function getColor(h, slope, wx, wz) {
+  const jitter = sn1.noise2D(wx * 0.08, wz * 0.08) * 0.05;
+  const hj = h + jitter * 8;
+  const biome = getBiome(wx, wz).name;
+
+  let c;
+
+  // Water / beach (same for all biomes, slight tint differences)
+  if (hj < G_SEA_LEVEL - 2) {
+    c = COL_DEEP_WATER.clone();
+  } else if (hj < G_SEA_LEVEL + 2) {
+    const sandCol = biome === 'desert'
+      ? new THREE.Color(0.88, 0.78, 0.52)
+      : biome === 'jungle' ? new THREE.Color(0.68, 0.64, 0.38)
+      : COL_SAND;
+    c = lerp3(COL_WET_SAND, sandCol, (hj - G_SEA_LEVEL + 2) / 4);
+  } else {
+    // Above beach — per biome
+    switch (biome) {
+      case 'mountains':
+        if      (hj < 55)  c = lerp3(new THREE.Color(0.26,0.46,0.16), new THREE.Color(0.20,0.36,0.12), (hj-G_SEA_LEVEL-2)/50);
+        else if (hj < 95)  c = lerp3(new THREE.Color(0.20,0.36,0.12), COL_SUBALPINE,   (hj-55)/40);
+        else if (hj < 130) c = lerp3(COL_SUBALPINE, COL_ROCK_LO,      (hj-95)/35);
+        else if (hj < 160) c = lerp3(COL_ROCK_LO,   COL_ROCK_HI,      (hj-130)/30);
+        else               c = lerp3(COL_ROCK_HI,   COL_SNOW,  Math.min(1,(hj-160)/25));
+        break;
+
+      case 'desert':
+        if      (hj < 25)  c = new THREE.Color(0.87, 0.77, 0.50);
+        else if (hj < 45)  c = lerp3(new THREE.Color(0.87,0.77,0.50), new THREE.Color(0.78,0.58,0.36), (hj-25)/20);
+        else               c = lerp3(new THREE.Color(0.78,0.58,0.36), new THREE.Color(0.62,0.42,0.26), Math.min(1,(hj-45)/20));
+        break;
+
+      case 'jungle':
+        if      (hj < 45)  c = new THREE.Color(0.10, 0.38, 0.08);
+        else if (hj < 80)  c = lerp3(new THREE.Color(0.10,0.38,0.08), new THREE.Color(0.08,0.28,0.07), (hj-45)/35);
+        else if (hj < 108) c = lerp3(new THREE.Color(0.08,0.28,0.07), new THREE.Color(0.30,0.27,0.16), (hj-80)/28);
+        else               c = lerp3(new THREE.Color(0.30,0.27,0.16), new THREE.Color(0.44,0.40,0.32), Math.min(1,(hj-108)/18));
+        break;
+
+      case 'forest':
+        if      (hj < 50)  c = lerp3(new THREE.Color(0.28,0.52,0.16), COL_FOREST,    (hj-G_SEA_LEVEL-2)/46);
+        else if (hj < 95)  c = lerp3(COL_FOREST, COL_SUBALPINE,       (hj-50)/45);
+        else if (hj < 130) c = lerp3(COL_SUBALPINE, COL_ROCK_LO,      (hj-95)/35);
+        else               c = lerp3(COL_ROCK_LO, COL_SNOW,   Math.min(1,(hj-130)/30));
+        break;
+
+      case 'flatland':
+      default:
+        if      (hj < 28)  c = new THREE.Color(0.40, 0.66, 0.20);
+        else if (hj < 48)  c = lerp3(new THREE.Color(0.40,0.66,0.20), new THREE.Color(0.30,0.54,0.16), (hj-28)/20);
+        else               c = lerp3(new THREE.Color(0.30,0.54,0.16), COL_ROCK_LO, Math.min(1,(hj-48)/18));
+        break;
+    }
+  }
+
+  // Steep slopes → exposed rock (skip in desert)
+  if (slope > 0.55 && h > G_SEA_LEVEL + 4 && biome !== 'desert') {
+    c.lerp(COL_STEEP_ROCK, Math.min(1, (slope - 0.55) * 2.8) * 0.85);
+  }
+
+  c.multiplyScalar(Math.max(0.72, 0.95 + jitter * 0.8));
+  return c;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  THREE.JS SCENE SETUP
+// ─────────────────────────────────────────────────────────────────────────────
+const scene    = new THREE.Scene();
+const SKY_COL  = new THREE.Color(0x6ca0c8);
+scene.background = SKY_COL;
+scene.fog        = new THREE.FogExp2(0x8ab8d4, 0.00045);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+renderer.toneMapping       = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.5, 2000);
+camera.position.set(0, 80, 0);
+
+// Lighting
+const ambient = new THREE.AmbientLight(0xd0e8ff, 0.55);
+scene.add(ambient);
+
+const sun = new THREE.DirectionalLight(0xfff5d0, 1.4);
+sun.position.set(600, 900, 400);
+sun.castShadow = true;
+sun.shadow.mapSize.width  = 2048;
+sun.shadow.mapSize.height = 2048;
+const sc = sun.shadow.camera;
+sc.near = 1; sc.far = 3000;
+sc.left = -800; sc.right = 800; sc.top = 800; sc.bottom = -800;
+scene.add(sun);
+
+const hemi = new THREE.HemisphereLight(0x7ab8e0, 0x4a6e3a, 0.7);
+scene.add(hemi);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  WATER PLANE  (follows camera, always covering ocean/rivers)
+// ─────────────────────────────────────────────────────────────────────────────
+// GPU water shader: animated wave normals + fresnel + sun specular + fog
+const waterGeo = new THREE.PlaneGeometry(30000, 30000, 1, 1);
+const waterMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime:       { value: 0 },
+    uSunDir:     { value: new THREE.Vector3(0.3, 0.8, 0.2) },
+    uCamPos:     { value: new THREE.Vector3() },
+    uShallow:    { value: new THREE.Color(0x4abedb) },
+    uDeep:       { value: new THREE.Color(0x062a48) },
+    uSkyTint:    { value: new THREE.Color(0x9cc8e6) },
+    uFogColor:   { value: new THREE.Color(0x8ab8d4) },
+    uFogDensity: { value: 0.0008 },
+    uOpacity:    { value: 0.85 },
+  },
+  transparent: true,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+  polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -1,
+  vertexShader: `
+    varying vec3 vWorldPos;
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWorldPos = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    varying vec3 vWorldPos;
+    uniform float uTime;
+    uniform vec3 uSunDir, uCamPos, uShallow, uDeep, uSkyTint, uFogColor;
+    uniform float uFogDensity, uOpacity;
+
+    // Sample two scrolling wave fields and use their gradient as a fake normal.
+    vec3 waveNormal(vec2 p) {
+      float t = uTime;
+      // Layered sin waves at different freq/direction give an organic ripple.
+      float h  = sin(p.x * 0.12 + t * 1.3)
+               + sin(p.y * 0.09 - t * 0.9) * 0.85
+               + sin((p.x + p.y) * 0.06 + t * 0.55) * 0.7
+               + sin((p.x - p.y) * 0.18 - t * 1.7) * 0.45;
+      float hx = cos(p.x * 0.12 + t * 1.3) * 0.12
+               + cos((p.x + p.y) * 0.06 + t * 0.55) * 0.06 * 0.7
+               + cos((p.x - p.y) * 0.18 - t * 1.7) * 0.18 * 0.45;
+      float hy = -sin(p.y * 0.09 - t * 0.9) * 0.09 * 0.85
+               + cos((p.x + p.y) * 0.06 + t * 0.55) * 0.06 * 0.7
+               - cos((p.x - p.y) * 0.18 - t * 1.7) * 0.18 * 0.45;
+      // Strength controls visual roughness
+      float k = 0.55;
+      return normalize(vec3(-hx * k, 1.0, -hy * k));
+    }
+
+    void main() {
+      vec3 N = waveNormal(vWorldPos.xz);
+      vec3 V = normalize(uCamPos - vWorldPos);
+      vec3 L = normalize(uSunDir);
+
+      // Fresnel: glancing angles → sky-tinted reflection
+      float fres = pow(1.0 - max(0.0, dot(V, N)), 4.0);
+
+      // Depth-faked base color: distance from camera as crude proxy
+      float camDist = length(uCamPos.xz - vWorldPos.xz);
+      float t = clamp(camDist / 200.0, 0.0, 1.0);
+      vec3 base = mix(uShallow, uDeep, 0.55 + t * 0.30);
+
+      // Sun specular
+      vec3 R = reflect(-L, N);
+      float spec = pow(max(0.0, dot(R, V)), 90.0) * max(0.0, L.y);
+
+      vec3 col = mix(base, uSkyTint, fres * 0.78);
+      col += vec3(1.0, 0.92, 0.72) * spec * 2.2;
+
+      // Exponential squared fog
+      float fd = length(uCamPos - vWorldPos) * uFogDensity;
+      float fogF = 1.0 - exp(-fd * fd);
+      col = mix(col, uFogColor, fogF);
+
+      gl_FragColor = vec4(col, uOpacity);
+    }
+  `,
+});
+const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+waterMesh.rotation.x = -Math.PI / 2;
+waterMesh.position.y  = G_SEA_LEVEL;
+scene.add(waterMesh);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  VEGETATION (instanced trees)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _mergeGeos(...geos) {
+  let totalV = 0, totalI = 0;
+  for (const g of geos) { totalV += g.attributes.position.count; totalI += g.index.array.length; }
+  const pos = new Float32Array(totalV * 3);
+  const idx = new Uint32Array(totalI);
+  let vo = 0, io = 0;
+  for (const g of geos) {
+    const src = g.attributes.position.array;
+    pos.set(src, vo * 3);
+    const si = g.index.array;
+    for (let i = 0; i < si.length; i++) idx[io + i] = si[i] + vo;
+    vo += g.attributes.position.count;
+    io += si.length;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  out.computeVertexNormals();
+  return out;
+}
+
+const TREE_GEOS = {};
+const TREE_MATS = {};
+
+(function initTreeGeos() {
+  // Conifer (pine)
+  const ct = new THREE.CylinderGeometry(0.7, 0.9, 5, 6, 1); ct.translate(0, 2.5, 0);
+  const cc = new THREE.ConeGeometry(3.8, 13, 7, 1);          cc.translate(0, 13.5, 0);
+  TREE_GEOS.conifer   = _mergeGeos(ct, cc);
+  TREE_MATS.conifer   = new THREE.MeshStandardMaterial({ color: 0x1a4020, roughness: 0.9 });
+
+  // Deciduous (round canopy)
+  const dt = new THREE.CylinderGeometry(0.8, 1.1, 6, 6, 1);  dt.translate(0, 3, 0);
+  const dc = new THREE.SphereGeometry(5, 7, 5);               dc.translate(0, 11.5, 0);
+  TREE_GEOS.deciduous = _mergeGeos(dt, dc);
+  TREE_MATS.deciduous = new THREE.MeshStandardMaterial({ color: 0x2e7020, roughness: 0.9 });
+
+  // Jungle (tall with big canopy)
+  const jt = new THREE.CylinderGeometry(1.0, 1.4, 14, 6, 1); jt.translate(0, 7, 0);
+  const jc = new THREE.SphereGeometry(6.5, 7, 5);             jc.translate(0, 18, 0);
+  TREE_GEOS.jungle    = _mergeGeos(jt, jc);
+  TREE_MATS.jungle    = new THREE.MeshStandardMaterial({ color: 0x103a0e, roughness: 0.9 });
+
+  // Cactus
+  const cb = new THREE.CylinderGeometry(1.1, 1.3, 12, 6, 1); cb.translate(0, 6, 0);
+  const ca1 = new THREE.CylinderGeometry(0.55, 0.55, 5, 5);
+  ca1.rotateZ(Math.PI / 2); ca1.translate(3.2, 8, 0);
+  const ca2 = new THREE.CylinderGeometry(0.55, 0.55, 5, 5);
+  ca2.rotateZ(-Math.PI / 2); ca2.translate(-3.2, 8, 0);
+  TREE_GEOS.cactus    = _mergeGeos(cb, ca1, ca2);
+  TREE_MATS.cactus    = new THREE.MeshStandardMaterial({ color: 0x4a7a30, roughness: 0.8 });
+})();
+
+const _treeMatrix = new THREE.Matrix4();
+const _treeQuat   = new THREE.Quaternion();
+const _treePos    = new THREE.Vector3();
+const _treeScale  = new THREE.Vector3();
+
+function buildChunkTrees(cx, cz) {
+  const obstacleKey = cKey(cx, cz);
+  const ox = cx * CHUNK_SIZE, oz = cz * CHUNK_SIZE;
+  const lists = { conifer: [], deciduous: [], jungle: [], cactus: [] };
+  const spacing = 22;
+
+  for (let lz = spacing * 0.5; lz < CHUNK_SIZE; lz += spacing) {
+    for (let lx = spacing * 0.5; lx < CHUNK_SIZE; lx += spacing) {
+      const jx = sn1.noise2D((ox + lx) * 0.28, (oz + lz) * 0.28) * spacing * 0.42;
+      const jz = sn2.noise2D((ox + lx) * 0.28, (oz + lz) * 0.28) * spacing * 0.42;
+      const wx = ox + lx + jx, wz = oz + lz + jz;
+      const h  = getHeight(wx, wz);
+      if (h < G_SEA_LEVEL + 1.5) continue;
+
+      const hL = getHeight(wx - 3, wz), hR = getHeight(wx + 3, wz);
+      const hU = getHeight(wx, wz - 3), hD = getHeight(wx, wz + 3);
+      const slope = Math.sqrt(((hR - hL) / 6) ** 2 + ((hD - hU) / 6) ** 2);
+      if (slope > 0.42) continue;
+
+      const bio = getBiome(wx, wz).name;
+      const rng = (sn3.noise2D(wx * 0.19, wz * 0.19) + 1) * 0.5;
+      const yaw = sn1.noise2D(wx * 0.07, wz * 0.07) * Math.PI;
+      const sc  = 0.72 + rng * 0.56;
+
+      if      (bio === 'forest'    && rng > 0.12 && h < 108) lists.deciduous.push(wx, h, wz, sc, yaw);
+      else if (bio === 'mountains' && rng > 0.55 && h < 82)  lists.conifer.push(wx, h, wz, sc * 0.9, yaw);
+      else if (bio === 'jungle'    && rng > 0.08 && h < 95)  lists.jungle.push(wx, h, wz, sc, yaw);
+      else if (bio === 'desert'    && rng > 0.80 && h < 42)  lists.cactus.push(wx, h, wz, sc * 0.85, yaw);
+      else if (bio === 'flatland'  && rng > 0.60 && h < 40)  lists.deciduous.push(wx, h, wz, sc * 0.8, yaw);
+    }
+  }
+
+  const meshes = [];
+  for (const [type, data] of Object.entries(lists)) {
+    const count = data.length / 5;
+    if (count === 0) continue;
+    const im = new THREE.InstancedMesh(TREE_GEOS[type], TREE_MATS[type], count);
+    im.castShadow = true;
+    for (let i = 0; i < count; i++) {
+      const base = i * 5;
+      _treePos.set(data[base], data[base + 1], data[base + 2]);
+      _treeQuat.setFromAxisAngle({ x: 0, y: 1, z: 0 }, data[base + 4]);
+      _treeScale.setScalar(data[base + 3]);
+      _treeMatrix.compose(_treePos, _treeQuat, _treeScale);
+      im.setMatrixAt(i, _treeMatrix);
+      // Record as obstacle so villagers steer around it. Radius scales with tree.
+      addObstacle(obstacleKey, data[base], data[base + 2], 2.2 * data[base + 3]);
+    }
+    im.instanceMatrix.needsUpdate = true;
+    meshes.push(im);
+  }
+  return meshes;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  VILLAGES
+// ─────────────────────────────────────────────────────────────────────────────
+let WALL_GEO, WALL_MAT, ROOF_GEO, ROOF_MAT, WELL_GEO, WELL_MAT;
+
+(function initVillageGeos() {
+  const walls = new THREE.BoxGeometry(12, 8, 10); walls.translate(0, 4, 0);
+  WALL_GEO = walls;
+  WALL_MAT = new THREE.MeshStandardMaterial({ color: 0xc4aa88, roughness: 0.92 });
+
+  const roof = new THREE.CylinderGeometry(0, 8.5, 5, 4, 1);
+  roof.rotateY(Math.PI / 4); roof.translate(0, 10.5, 0);
+  ROOF_GEO = roof;
+  ROOF_MAT = new THREE.MeshStandardMaterial({ color: 0x6a3e1a, roughness: 0.97 });
+
+  const wb = new THREE.CylinderGeometry(2.2, 2.6, 3.5, 8); wb.translate(0, 1.75, 0);
+  WELL_GEO = wb;
+  WELL_MAT = new THREE.MeshStandardMaterial({ color: 0x888070, roughness: 0.9 });
+})();
+
+class VillageRNG {
+  constructor(s) { this.s = s | 0; }
+  next() { this.s = Math.imul(this.s, 1664525) + 1013904223 | 0; return (this.s >>> 0) / 4294967296; }
+}
+
+const villageLocations = []; // for minimap display
+
+function findVillageForChunk(cx, cz) {
+  const r = (sn1.noise2D(cx * 5.13 + 0.5, cz * 5.13 - 0.5) + 1) * 0.5;
+  if (r < 0.75) { return null; }
+
+  const jx = ((sn2.noise2D(cx * 3.7, cz * 3.7) + 1) * 0.3) + 0.2;
+  const jz = ((sn2.noise2D(cx * 3.7 + 9, cz * 3.7 + 9) + 1) * 0.3) + 0.2;
+  const wx = (cx + jx) * CHUNK_SIZE;
+  const wz = (cz + jz) * CHUNK_SIZE;
+
+  const bio = getBiome(wx, wz).name;
+  if (bio === 'desert' || bio === 'mountains') { console.log(`[village] chunk(${cx},${cz}) rejected: biome=${bio}`); return null; }
+
+  const vh = getHeight(wx, wz);
+  if (vh <= G_SEA_LEVEL || vh > 70) { console.log(`[village] chunk(${cx},${cz}) rejected: height=${vh.toFixed(1)} sea=${G_SEA_LEVEL}`); return null; }
+
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const rh = getHeight(wx + Math.cos(a) * 50, wz + Math.sin(a) * 50);
+    if (rh < G_SEA_LEVEL + 1) { console.log(`[village] chunk(${cx},${cz}) rejected: ring water rh=${rh.toFixed(1)}`); return null; }
+  }
+
+  console.log(`[village] chunk(${cx},${cz}) ACCEPTED at (${wx.toFixed(0)},${wz.toFixed(0)}) h=${vh.toFixed(1)} bio=${bio}`);
+  return { wx, wz, seed: (Math.imul(cx, 99991) + cz) | 0 };
+}
+
+function buildVillageAt(wx, wz, seed, obstacleKey) {
+  const rng  = new VillageRNG(seed);
+  const count = 5 + (rng.next() * 4 | 0);
+  const meshes = [];
+
+  const walls = new THREE.InstancedMesh(WALL_GEO, WALL_MAT, count);
+  const roofs = new THREE.InstancedMesh(ROOF_GEO, ROOF_MAT, count);
+  walls.castShadow = roofs.castShadow = true;
+
+  const m4 = new THREE.Matrix4();
+  const p  = new THREE.Vector3();
+  const q  = new THREE.Quaternion();
+  const s  = new THREE.Vector3(1, 1, 1);
+
+  for (let i = 0; i < count; i++) {
+    const ang  = (i / count) * Math.PI * 2 + rng.next() * 0.6;
+    const dist = 30 + rng.next() * 28;
+    const hx = wx + Math.cos(ang) * dist;
+    const hz = wz + Math.sin(ang) * dist;
+    p.set(hx, getHeight(hx, hz), hz);
+    q.setFromAxisAngle({ x:0, y:1, z:0 }, rng.next() * Math.PI * 2);
+    m4.compose(p, q, s);
+    walls.setMatrixAt(i, m4);
+    roofs.setMatrixAt(i, m4);
+    if (obstacleKey) addObstacle(obstacleKey, hx, hz, 7);
+  }
+  walls.instanceMatrix.needsUpdate = true;
+  roofs.instanceMatrix.needsUpdate = true;
+  meshes.push(walls, roofs);
+
+  // Central well
+  const well = new THREE.Mesh(WELL_GEO, WELL_MAT);
+  well.position.set(wx, getHeight(wx, wz), wz);
+  well.castShadow = true;
+  meshes.push(well);
+
+  return meshes;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  RUINS (broken pillars + wall fragments in mountains/desert)
+// ─────────────────────────────────────────────────────────────────────────────
+let PILLAR_GEO, BLOCK_GEO, RUIN_MAT;
+(function initRuinGeos() {
+  PILLAR_GEO = new THREE.CylinderGeometry(1.2, 1.4, 8, 8);
+  PILLAR_GEO.translate(0, 4, 0);
+  BLOCK_GEO  = new THREE.BoxGeometry(4, 2, 2.5);
+  BLOCK_GEO.translate(0, 1, 0);
+  RUIN_MAT   = new THREE.MeshStandardMaterial({ color: 0xa89c84, roughness: 0.95 });
+})();
+
+const ruinLocations = []; // for minimap
+
+function findRuinForChunk(cx, cz) {
+  const r = (sn2.noise2D(cx * 7.31 - 1.5, cz * 7.31 + 1.5) + 1) * 0.5;
+  if (r < 0.85) return null; // ~15% of chunks attempt a ruin
+
+  const jx = ((sn3.noise2D(cx * 4.1, cz * 4.1) + 1) * 0.3) + 0.2;
+  const jz = ((sn3.noise2D(cx * 4.1 + 11, cz * 4.1 + 11) + 1) * 0.3) + 0.2;
+  const wx = (cx + jx) * CHUNK_SIZE;
+  const wz = (cz + jz) * CHUNK_SIZE;
+
+  const bio = getBiome(wx, wz).name;
+  if (bio !== 'mountains' && bio !== 'desert' && bio !== 'flatland') return null;
+
+  const rh = getHeight(wx, wz);
+  if (rh < G_SEA_LEVEL + 2 || rh > 160) return null;
+
+  // Reasonable slope - not too cliff-like
+  const hs = [getHeight(wx+20,wz), getHeight(wx-20,wz), getHeight(wx,wz+20), getHeight(wx,wz-20)];
+  if (Math.max(...hs) - Math.min(...hs) > 35) return null;
+
+  return { wx, wz, seed: (Math.imul(cx, 31337) + cz * 7919) | 0 };
+}
+
+function buildRuinAt(wx, wz, seed) {
+  const rng = new VillageRNG(seed);
+  const meshes = [];
+  const pillarCount = 3 + (rng.next() * 4 | 0); // 3-6 broken pillars
+  const blockCount  = 4 + (rng.next() * 5 | 0); // 4-8 fallen blocks
+
+  // Pillars: standing or broken (random height scale)
+  const pillars = new THREE.InstancedMesh(PILLAR_GEO, RUIN_MAT, pillarCount);
+  pillars.castShadow = true;
+  const m4 = new THREE.Matrix4();
+  const p  = new THREE.Vector3();
+  const q  = new THREE.Quaternion();
+  const s  = new THREE.Vector3();
+  for (let i = 0; i < pillarCount; i++) {
+    const ang  = (i / pillarCount) * Math.PI * 2 + rng.next() * 0.4;
+    const dist = 8 + rng.next() * 12;
+    const px = wx + Math.cos(ang) * dist;
+    const pz = wz + Math.sin(ang) * dist;
+    const heightFrac = 0.2 + rng.next() * 0.9; // shorter = more "broken"
+    p.set(px, getHeight(px, pz), pz);
+    // Slight lean for fallen-looking pillars
+    const lean = (rng.next() - 0.5) * 0.35;
+    q.setFromAxisAngle({ x: Math.cos(ang), y: 0, z: Math.sin(ang) }, lean);
+    s.set(1, heightFrac, 1);
+    m4.compose(p, q, s);
+    pillars.setMatrixAt(i, m4);
+  }
+  pillars.instanceMatrix.needsUpdate = true;
+  meshes.push(pillars);
+
+  // Scattered fallen blocks
+  const blocks = new THREE.InstancedMesh(BLOCK_GEO, RUIN_MAT, blockCount);
+  blocks.castShadow = true;
+  for (let i = 0; i < blockCount; i++) {
+    const ang  = rng.next() * Math.PI * 2;
+    const dist = 4 + rng.next() * 22;
+    const bx = wx + Math.cos(ang) * dist;
+    const bz = wz + Math.sin(ang) * dist;
+    p.set(bx, getHeight(bx, bz), bz);
+    q.setFromAxisAngle({ x: 0, y: 1, z: 0 }, rng.next() * Math.PI * 2);
+    s.set(0.6 + rng.next() * 0.8, 0.4 + rng.next() * 0.7, 0.6 + rng.next() * 0.8);
+    m4.compose(p, q, s);
+    blocks.setMatrixAt(i, m4);
+  }
+  blocks.instanceMatrix.needsUpdate = true;
+  meshes.push(blocks);
+
+  return meshes;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  LAKES — small inland water bodies in flat areas. Reuses ocean water shader.
+// ─────────────────────────────────────────────────────────────────────────────
+const lakeLocations = []; // for minimap + cleanup
+
+function findLakeForChunk(cx, cz) {
+  const r = (sn3.noise2D(cx * 6.71 + 1.7, cz * 6.71 - 1.7) + 1) * 0.5;
+  if (r < 0.78) return null; // ~22% of chunks attempt a lake
+
+  const jx = ((sn1.noise2D(cx * 5.1 + 2, cz * 5.1 + 2) + 1) * 0.3) + 0.2;
+  const jz = ((sn1.noise2D(cx * 5.1 - 4, cz * 5.1 - 4) + 1) * 0.3) + 0.2;
+  const wx = (cx + jx) * CHUNK_SIZE;
+  const wz = (cz + jz) * CHUNK_SIZE;
+
+  const bio = getBiome(wx, wz).name;
+  if (bio === 'desert' || bio === 'mountains') return null;
+
+  const ch = getHeight(wx, wz);
+  if (ch < G_SEA_LEVEL + 2 || ch > 50) return null;
+
+  // Must be a real basin: surrounding ring higher than center
+  const ring = [getHeight(wx+40,wz), getHeight(wx-40,wz), getHeight(wx,wz+40), getHeight(wx,wz-40)];
+  const minRim = Math.min(...ring);
+  if (minRim < ch + 1.5) return null; // not enough depression
+
+  const radius = 24 + (sn2.noise2D(cx * 11, cz * 11) + 1) * 18;
+  const waterY = ch + Math.min(2.5, (minRim - ch) * 0.6);
+  return { wx, wz, waterY, radius, seed: (Math.imul(cx, 1093) + cz * 6151) | 0 };
+}
+
+function buildLakeAt(lake) {
+  // Reuse the ocean water shader so the look is consistent
+  const geo = new THREE.CircleGeometry(lake.radius, 24);
+  const mesh = new THREE.Mesh(geo, waterMat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(lake.wx, lake.waterY, lake.wz);
+  return [mesh];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  WILDLIFE — rabbit/deer (prey), wolf (predator). Wolves hunt, herbivores flee.
+// ─────────────────────────────────────────────────────────────────────────────
+const MAX_ANIMAL    = 35;
+const TARGET_COUNTS = { rabbit: 22, deer: 14, wolf: 6 };
+
+let RABBIT_GEO, RABBIT_MAT, DEER_GEO, DEER_MAT, WOLF_GEO, WOLF_MAT;
+(function initAnimalGeos() {
+  const rb = new THREE.BoxGeometry(0.6, 0.5, 1.0); rb.translate(0, 0.25, 0);
+  RABBIT_GEO = rb;
+  RABBIT_MAT = new THREE.MeshStandardMaterial({ color: 0xc8a888, roughness: 0.9 });
+  const db = new THREE.BoxGeometry(1.1, 1.6, 2.4); db.translate(0, 0.8, 0);
+  DEER_GEO = db;
+  DEER_MAT = new THREE.MeshStandardMaterial({ color: 0x8b5e3c, roughness: 0.9 });
+  const wb = new THREE.BoxGeometry(0.9, 1.0, 2.0); wb.translate(0, 0.5, 0);
+  WOLF_GEO = wb;
+  WOLF_MAT = new THREE.MeshStandardMaterial({ color: 0x5a5a66, roughness: 0.9 });
+})();
+
+function makeAnimalMesh(geo, mat) {
+  const m = new THREE.InstancedMesh(geo, mat, MAX_ANIMAL);
+  m.frustumCulled = false; m.castShadow = true;
+  const z = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (let i = 0; i < MAX_ANIMAL; i++) m.setMatrixAt(i, z);
+  m.instanceMatrix.needsUpdate = true;
+  return m;
+}
+const _animalMeshes = {
+  rabbit: makeAnimalMesh(RABBIT_GEO, RABBIT_MAT),
+  deer:   makeAnimalMesh(DEER_GEO,   DEER_MAT),
+  wolf:   makeAnimalMesh(WOLF_GEO,   WOLF_MAT),
+};
+scene.add(_animalMeshes.rabbit, _animalMeshes.deer, _animalMeshes.wolf);
+
+const _animalSlots = { rabbit: new Array(MAX_ANIMAL).fill(null),
+                        deer:   new Array(MAX_ANIMAL).fill(null),
+                        wolf:   new Array(MAX_ANIMAL).fill(null) };
+const animals = [];
+let _spawnTimer = 0;
+const stats = { eaten: 0, starved: 0 };
+
+function freeSlot(type) {
+  for (let i = 0; i < MAX_ANIMAL; i++) if (_animalSlots[type][i] === null) return i;
+  return -1;
+}
+
+function spawnAnimal(type, wx, wz) {
+  const slot = freeSlot(type);
+  if (slot < 0) return null;
+  const reproCooldown = type === 'wolf' ? 55 + Math.random() * 20 : 18 + Math.random() * 12;
+  const a = {
+    type, slot, alive: true,
+    x: wx, z: wz, y: getHeight(wx, wz),
+    vx: 0, vz: 0, yaw: Math.random() * Math.PI * 2,
+    hunger: 0, target: null,
+    wanderAng: Math.random() * Math.PI * 2,
+    wanderTimer: 1 + Math.random() * 3,
+    reproTimer: reproCooldown,
+  };
+  _animalSlots[type][slot] = a;
+  animals.push(a);
+  return a;
+}
+
+function despawnAnimal(a) {
+  if (!a.alive) return;
+  a.alive = false;
+  _animalSlots[a.type][a.slot] = null;
+}
+
+function spawnPack(count, type) {
+  for (let i = 0; i < count; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const d   = 80 + Math.random() * 220;
+    const wx  = camera.position.x + Math.cos(ang) * d;
+    const wz  = camera.position.z + Math.sin(ang) * d;
+    const h   = getHeight(wx, wz);
+    if (h < G_SEA_LEVEL + 1 || h > 120) continue;
+    spawnAnimal(type, wx, wz);
+  }
+}
+
+const _aMat = new THREE.Matrix4();
+const _aPos = new THREE.Vector3();
+const _aQuat = new THREE.Quaternion();
+const _aScale = new THREE.Vector3(1, 1, 1);
+const _hideMat = new THREE.Matrix4().makeScale(0, 0, 0);
+
+function updateAnimals(dt) {
+  _spawnTimer -= dt;
+  if (_spawnTimer <= 0) {
+    _spawnTimer = 2.5;
+    const c = { rabbit: 0, deer: 0, wolf: 0 };
+    for (const a of animals) if (a.alive) c[a.type]++;
+    for (const t in TARGET_COUNTS) {
+      const need = TARGET_COUNTS[t] - c[t];
+      if (need > 0) spawnPack(Math.min(need, 4), t);
+    }
+  }
+
+  for (const a of animals) {
+    if (!a.alive) continue;
+    const SPEED = a.type === 'rabbit' ? 15 : a.type === 'deer' ? 11 : 12;
+
+    if (a.type === 'wolf') {
+      a.hunger += dt * 0.018;
+      if (a.hunger > 2.6) { stats.starved++; despawnAnimal(a); continue; }
+      // Find or pursue prey
+      if (!a.target || !a.target.alive) {
+        let best = null, bestD = Infinity;
+        for (const o of animals) {
+          if (!o.alive || (o.type !== 'rabbit' && o.type !== 'deer')) continue;
+          const d = (o.x - a.x) ** 2 + (o.z - a.z) ** 2;
+          if (d < bestD && d < 90 * 90) { bestD = d; best = o; }
+        }
+        a.target = best;
+      }
+      if (a.target) {
+        const dx = a.target.x - a.x, dz = a.target.z - a.z;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (d < 1.6) {
+          stats.eaten++;
+          despawnAnimal(a.target);
+          a.hunger = Math.max(0, a.hunger - 1.4);
+          a.target = null;
+        } else {
+          a.vx = dx / d * SPEED;
+          a.vz = dz / d * SPEED;
+        }
+      } else {
+        a.wanderTimer -= dt;
+        if (a.wanderTimer <= 0) {
+          a.wanderAng = Math.random() * Math.PI * 2;
+          a.wanderTimer = 2 + Math.random() * 3;
+        }
+        a.vx = Math.cos(a.wanderAng) * 4;
+        a.vz = Math.sin(a.wanderAng) * 4;
+      }
+    } else {
+      // Herbivore: flee nearest threat (wolf OR hunting villager)
+      let threat = null, td = Infinity;
+      for (const o of animals) {
+        if (!o.alive || o.type !== 'wolf') continue;
+        const d = (o.x - a.x) ** 2 + (o.z - a.z) ** 2;
+        if (d < td) { td = d; threat = o; }
+      }
+      for (const h of villagers) {
+        if (!h.alive || h.state !== 'hunting') continue;
+        const d = (h.x - a.x) ** 2 + (h.z - a.z) ** 2;
+        if (d < td) { td = d; threat = h; }
+      }
+      if (threat && td < 45 * 45) {
+        const dx = a.x - threat.x, dz = a.z - threat.z;
+        const d = Math.sqrt(dx * dx + dz * dz) || 0.01;
+        a.vx = dx / d * SPEED;
+        a.vz = dz / d * SPEED;
+      } else {
+        a.wanderTimer -= dt;
+        if (a.wanderTimer <= 0) {
+          a.wanderAng = Math.random() * Math.PI * 2;
+          a.wanderTimer = 2 + Math.random() * 3;
+        }
+        a.vx = Math.cos(a.wanderAng) * 3;
+        a.vz = Math.sin(a.wanderAng) * 3;
+      }
+    }
+
+    applyAvoid(a);
+
+    a.x += a.vx * dt;
+    a.z += a.vz * dt;
+    a.y = getHeight(a.x, a.z);
+    if (a.vx * a.vx + a.vz * a.vz > 0.5) a.yaw = Math.atan2(a.vx, a.vz);
+
+    // Reproduction
+    a.reproTimer -= dt;
+    if (a.reproTimer <= 0) {
+      a.reproTimer = (a.type === 'wolf' ? 55 : 18) + Math.random() * 12;
+      const count = animals.filter(o => o.alive && o.type === a.type).length;
+      if (count < TARGET_COUNTS[a.type] * 1.4) {
+        for (const b of animals) {
+          if (!b.alive || b === a || b.type !== a.type) continue;
+          const d2 = (b.x - a.x) ** 2 + (b.z - a.z) ** 2;
+          if (d2 < 18 * 18) {
+            spawnAnimal(a.type, a.x + (Math.random()-0.5)*4, a.z + (Math.random()-0.5)*4);
+            break;
+          }
+        }
+      }
+    }
+
+    const ddx = a.x - camera.position.x, ddz = a.z - camera.position.z;
+    if (ddx * ddx + ddz * ddz > 500 * 500) despawnAnimal(a);
+  }
+
+  for (let i = animals.length - 1; i >= 0; i--) if (!animals[i].alive) animals.splice(i, 1);
+
+  // Update all instance matrices (reset hidden, then place active)
+  for (const t in _animalMeshes) {
+    const m = _animalMeshes[t];
+    for (let i = 0; i < MAX_ANIMAL; i++) m.setMatrixAt(i, _hideMat);
+  }
+  for (const a of animals) {
+    _aPos.set(a.x, a.y, a.z);
+    _aQuat.setFromAxisAngle({ x: 0, y: 1, z: 0 }, a.yaw);
+    _aMat.compose(_aPos, _aQuat, _aScale);
+    _animalMeshes[a.type].setMatrixAt(a.slot, _aMat);
+  }
+  for (const t in _animalMeshes) _animalMeshes[t].instanceMatrix.needsUpdate = true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  VILLAGERS — walk near home, occasionally explore, avoid obstacles + terrain,
+//  bridge water, and found new settlements at suitable distant flat sites.
+// ─────────────────────────────────────────────────────────────────────────────
+const MAX_VILLAGERS = 80;
+const VILLAGER_PER_VILLAGE = 4;
+const MIGRATE_THRESHOLD = 7; // village pop that triggers a migration group
+let _migrateCheckTimer = 15;
+const villagers = [];
+const obstacles = new Map(); // chunkKey → [{ x, z, r }, …]
+const bridges   = [];
+let villagerStats = { founded: 0, bridges: 0, caught: 0 };
+
+let VILLAGER_GEO, VILLAGER_MAT, BRIDGE_MAT, villagerMesh;
+(function initVillagerGeo() {
+  // Sized so they read clearly from the air — total ~3.6 units tall.
+  const body = new THREE.BoxGeometry(1.3, 2.6, 0.8); body.translate(0, 1.3, 0);
+  const head = new THREE.BoxGeometry(0.9, 0.9, 0.9); head.translate(0, 3.05, 0);
+  VILLAGER_GEO = _mergeGeos(body, head);
+  VILLAGER_MAT = new THREE.MeshStandardMaterial({ color: 0xd83020, roughness: 0.7 }); // bright red — easy to spot
+  BRIDGE_MAT   = new THREE.MeshStandardMaterial({ color: 0x6a4830, roughness: 0.95 });
+})();
+
+villagerMesh = new THREE.InstancedMesh(VILLAGER_GEO, VILLAGER_MAT, MAX_VILLAGERS);
+villagerMesh.frustumCulled = false; villagerMesh.castShadow = true;
+const _hideV = new THREE.Matrix4().makeScale(0, 0, 0);
+for (let i = 0; i < MAX_VILLAGERS; i++) villagerMesh.setMatrixAt(i, _hideV);
+villagerMesh.instanceMatrix.needsUpdate = true;
+scene.add(villagerMesh);
+
+const _vSlots = new Array(MAX_VILLAGERS).fill(null);
+function findVSlot() {
+  for (let i = 0; i < MAX_VILLAGERS; i++) if (_vSlots[i] === null) return i;
+  return -1;
+}
+
+function spawnVillager(village) {
+  const slot = findVSlot();
+  if (slot < 0) return null;
+  const ang  = Math.random() * Math.PI * 2;
+  const dist = 5 + Math.random() * 22;
+  const x = village.wx + Math.cos(ang) * dist;
+  const z = village.wz + Math.sin(ang) * dist;
+  const v = {
+    slot, alive: true,
+    homeKey: village.key, homeX: village.wx, homeZ: village.wz,
+    x, z, y: getHeight(x, z),
+    vx: 0, vz: 0, yaw: 0,
+    state: 'idle', stateTimer: Math.random() * 4,
+    reproTimer: 25 + Math.random() * 20,
+    migrateDir: 0, migrateSteps: 0, migrateGroupId: -1, stuckCounter: 0,
+  };
+  _vSlots[slot] = v;
+  villagers.push(v);
+  return v;
+}
+
+function despawnVillager(v) {
+  if (!v.alive) return;
+  v.alive = false;
+  _vSlots[v.slot] = null;
+}
+
+function addObstacle(key, x, z, r) {
+  let arr = obstacles.get(key);
+  if (!arr) { arr = []; obstacles.set(key, arr); }
+  arr.push({ x, z, r });
+}
+
+// Soft repulsion from any tree/house within its radius.
+function applyAvoid(v) {
+  const cx = Math.floor(v.x / CHUNK_SIZE);
+  const cz = Math.floor(v.z / CHUNK_SIZE);
+  let fx = 0, fz = 0;
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const arr = obstacles.get(cKey(cx + dx, cz + dz));
+      if (!arr) continue;
+      for (const o of arr) {
+        const ddx = v.x - o.x, ddz = v.z - o.z;
+        const d2 = ddx*ddx + ddz*ddz;
+        const r = o.r + 1.5;
+        if (d2 < r * r && d2 > 0.01) {
+          const d = Math.sqrt(d2);
+          const push = (r - d) / r * 12;
+          fx += ddx / d * push;
+          fz += ddz / d * push;
+        }
+      }
+    }
+  }
+  v.vx += fx;
+  v.vz += fz;
+}
+
+// Bridge across a water gap in the villager's current direction.
+function buildBridge(v) {
+  let len;
+  for (len = 5; len < 70; len += 4) {
+    const tx = v.x + Math.sin(v.exploreDir) * len;
+    const tz = v.z + Math.cos(v.exploreDir) * len;
+    if (getHeight(tx, tz) > G_SEA_LEVEL - 0.5) break;
+  }
+  if (len >= 70) return false;
+
+  const geo = new THREE.BoxGeometry(3, 0.4, len);
+  const bridge = new THREE.Mesh(geo, BRIDGE_MAT);
+  bridge.position.set(
+    v.x + Math.sin(v.exploreDir) * len * 0.5,
+    G_SEA_LEVEL + 0.5,
+    v.z + Math.cos(v.exploreDir) * len * 0.5,
+  );
+  bridge.rotation.y = -v.exploreDir;
+  bridge.castShadow = true;
+  scene.add(bridge);
+  bridges.push(bridge);
+
+  // Step the villager just past the far side
+  v.x += Math.sin(v.exploreDir) * (len + 3);
+  v.z += Math.cos(v.exploreDir) * (len + 3);
+  villagerStats.bridges++;
+  return true;
+}
+
+function canFoundVillage(wx, wz) {
+  const bio = getBiome(wx, wz).name;
+  if (bio === 'desert' || bio === 'mountains') return false;
+  const h = getHeight(wx, wz);
+  if (h < G_SEA_LEVEL + 3 || h > 90) return false;
+  for (const vl of villageLocations) {
+    if ((vl.wx - wx) ** 2 + (vl.wz - wz) ** 2 < 250 * 250) return false;
+  }
+  // House ring must be on land
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    if (getHeight(wx + Math.cos(a) * 50, wz + Math.sin(a) * 50) < G_SEA_LEVEL + 1) return false;
+  }
+  return true;
+}
+
+function foundNewVillage(v) {
+  const wx = v.x, wz = v.z;
+  const cx = Math.floor(wx / CHUNK_SIZE);
+  const cz = Math.floor(wz / CHUNK_SIZE);
+  const key = cKey(cx, cz);
+  const seed = (Math.imul(cx, 99991) + cz) ^ (Date.now() & 0xffff);
+
+  const meshes = buildVillageAt(wx, wz, seed);
+  meshes.forEach(m => scene.add(m));
+
+  // Record house positions as obstacles so other villagers walk around them.
+  for (const m of meshes) {
+    if (!m.isInstancedMesh) continue;
+    const M = new THREE.Matrix4();
+    const P = new THREE.Vector3();
+    for (let i = 0; i < m.count; i++) {
+      m.getMatrixAt(i, M);
+      P.setFromMatrixPosition(M);
+      addObstacle(key, P.x, P.z, 5);
+    }
+  }
+
+  // Attach meshes to existing chunk so unload disposes them properly
+  const existing = chunkCache.get(key);
+  if (existing) existing.trees.push(...meshes);
+
+  villageLocations.push({ wx, wz, key });
+  const newVillage = { wx, wz, key };
+  for (let i = 0; i < VILLAGER_PER_VILLAGE - 1; i++) spawnVillager(newVillage);
+
+  // The founder switches their home to the new settlement
+  v.homeKey = key; v.homeX = wx; v.homeZ = wz;
+  villagerStats.founded++;
+}
+
+const _vMat = new THREE.Matrix4();
+const _vPos = new THREE.Vector3();
+const _vQuat = new THREE.Quaternion();
+const _vScale = new THREE.Vector3(1, 1, 1);
+
+function updateVillagers(dt) {
+  // Trigger migration when a village is overcrowded
+  _migrateCheckTimer -= dt;
+  if (_migrateCheckTimer <= 0) {
+    _migrateCheckTimer = 20;
+    const counts = new Map();
+    for (const v of villagers) {
+      if (!v.alive || v.state === 'migrating') continue;
+      counts.set(v.homeKey, (counts.get(v.homeKey) || 0) + 1);
+    }
+    for (const [key, count] of counts) {
+      if (count >= MIGRATE_THRESHOLD) {
+        const candidates = villagers.filter(o => o.alive && o.homeKey === key && o.state === 'idle');
+        if (candidates.length >= 2) {
+          const groupId = Date.now();
+          const dir = Math.random() * Math.PI * 2;
+          for (let i = 0; i < 2; i++) {
+            const m = candidates[i];
+            m.state = 'migrating';
+            m.migrateDir = dir + (Math.random() - 0.5) * 0.4;
+            m.migrateSteps = 130 + Math.random() * 60;
+            m.migrateGroupId = groupId;
+            m.stuckCounter = 0;
+          }
+        }
+      }
+    }
+  }
+
+  for (const v of villagers) {
+    if (!v.alive) continue;
+    v.stateTimer -= dt;
+
+    if (v.state === 'idle') {
+      v.vx *= 0.7; v.vz *= 0.7;
+
+      // Reproduction: grow the village while it's small
+      v.reproTimer -= dt;
+      if (v.reproTimer <= 0) {
+        v.reproTimer = 25 + Math.random() * 20;
+        const homeCount = villagers.filter(o => o.alive && o.homeKey === v.homeKey && o.state !== 'migrating').length;
+        if (homeCount < MIGRATE_THRESHOLD) spawnVillager({ wx: v.homeX, wz: v.homeZ, key: v.homeKey });
+      }
+
+      if (v.stateTimer <= 0) {
+        let prey = null, pd = Infinity;
+        for (const o of animals) {
+          if (!o.alive || (o.type !== 'rabbit' && o.type !== 'deer')) continue;
+          const dx = o.x - v.x, dz = o.z - v.z;
+          const d2 = dx*dx + dz*dz;
+          if (d2 < pd && d2 < 70 * 70) { pd = d2; prey = o; }
+        }
+        if (prey && Math.random() < 0.55) {
+          v.state = 'hunting';
+          v.target = prey;
+          v.huntTimer = 12;
+        } else {
+          v.state = 'wandering';
+        }
+        v.stateTimer = 3 + Math.random() * 4;
+      }
+    } else if (v.state === 'hunting') {
+      v.huntTimer -= dt;
+      // Drop target if it died or wandered too far
+      if (!v.target || !v.target.alive) v.target = null;
+      if (v.target) {
+        const ddx = v.target.x - v.x, ddz = v.target.z - v.z;
+        const d2 = ddx*ddx + ddz*ddz;
+        if (d2 > 120 * 120) v.target = null;
+      }
+      if (!v.target || v.huntTimer <= 0) {
+        v.state = 'idle';
+        v.stateTimer = 2;
+        v.target = null;
+      } else {
+        const ddx = v.target.x - v.x, ddz = v.target.z - v.z;
+        const d = Math.sqrt(ddx*ddx + ddz*ddz);
+        if (d < 3.5) {
+          // Caught — eat the animal
+          despawnAnimal(v.target);
+          villagerStats.caught++;
+          v.target = null;
+          v.state = 'idle';
+          v.stateTimer = 3 + Math.random() * 2;
+        } else {
+          v.vx = ddx / d * 14;  // fast enough to outrun deer/rabbit
+          v.vz = ddz / d * 14;
+        }
+      }
+    } else if (v.state === 'wandering') {
+      const dxH = v.x - v.homeX, dzH = v.z - v.homeZ;
+      const distH = Math.sqrt(dxH*dxH + dzH*dzH);
+      let dir;
+      if (distH > 55) {
+        dir = Math.atan2(-dxH, -dzH); // turn back toward home
+      } else {
+        dir = v.yaw + (Math.random() - 0.5) * 0.7;
+      }
+      v.vx = Math.sin(dir) * 2.5;
+      v.vz = Math.cos(dir) * 2.5;
+      if (v.stateTimer <= 0) { v.state = 'idle'; v.stateTimer = 2 + Math.random() * 4; }
+    } else if (v.state === 'migrating') {
+      v.migrateSteps -= dt;
+      v.vx = Math.sin(v.migrateDir) * 5.5;
+      v.vz = Math.cos(v.migrateDir) * 5.5;
+
+      const lookX = v.x + v.vx * 0.9;
+      const lookZ = v.z + v.vz * 0.9;
+      const lookH = getHeight(lookX, lookZ);
+
+      const reroute = (predicate) => {
+        let bestAng = null, bestScore = -Infinity;
+        for (let i = 0; i < 8; i++) {
+          const ang = v.migrateDir + (i - 3.5) * 0.45;
+          const tx = v.x + Math.sin(ang) * 14;
+          const tz = v.z + Math.cos(ang) * 14;
+          const th = getHeight(tx, tz);
+          if (predicate(th)) {
+            const score = -Math.abs(ang - v.migrateDir);
+            if (score > bestScore) { bestScore = score; bestAng = ang; }
+          }
+        }
+        return bestAng;
+      };
+
+      if (lookH < G_SEA_LEVEL + 0.5) {
+        const alt = reroute(th => th > G_SEA_LEVEL + 0.5);
+        if (alt !== null) { v.migrateDir = alt; v.stuckCounter = 0; }
+        else {
+          v.stuckCounter += dt;
+          if (v.stuckCounter > 1.8) {
+            if (!buildBridge(v)) v.migrateDir += Math.PI;
+            v.stuckCounter = 0;
+          }
+        }
+      } else if (lookH - v.y > 5) {
+        const alt = reroute(th => th > G_SEA_LEVEL + 0.5 && Math.abs(th - v.y) < 5);
+        if (alt !== null) v.migrateDir = alt;
+        else v.migrateDir += Math.PI * 0.5;
+      }
+
+      const dxH = v.x - v.homeX, dzH = v.z - v.homeZ;
+      const distH = Math.sqrt(dxH*dxH + dzH*dzH);
+      if (distH > 350 && canFoundVillage(v.x, v.z)) {
+        // Check if group partner is also close by before founding
+        const partner = villagers.find(o => o.alive && o !== v && o.migrateGroupId === v.migrateGroupId);
+        if (!partner || (partner.x - v.x) ** 2 + (partner.z - v.z) ** 2 < 100 * 100) {
+          foundNewVillage(v);
+          if (partner) { partner.homeKey = v.homeKey; partner.homeX = v.homeX; partner.homeZ = v.homeZ; partner.state = 'idle'; partner.stateTimer = 5; }
+          v.state = 'idle'; v.stateTimer = 5;
+        }
+      } else if (v.migrateSteps <= 0 || distH > 1100) {
+        v.state = 'wandering'; v.stateTimer = 4; // give up, wander back
+      }
+    }
+
+    applyAvoid(v);
+
+    v.x += v.vx * dt;
+    v.z += v.vz * dt;
+    v.y = Math.max(G_SEA_LEVEL, getHeight(v.x, v.z));
+    if (v.vx*v.vx + v.vz*v.vz > 0.1) v.yaw = Math.atan2(v.vx, v.vz);
+
+    const ddx = v.x - camera.position.x, ddz = v.z - camera.position.z;
+    if (ddx*ddx + ddz*ddz > 1100*1100) despawnVillager(v);
+  }
+
+  // Compact dead villagers
+  for (let i = villagers.length - 1; i >= 0; i--) if (!villagers[i].alive) villagers.splice(i, 1);
+
+  // Update instance transforms
+  for (let i = 0; i < MAX_VILLAGERS; i++) villagerMesh.setMatrixAt(i, _hideV);
+  for (const v of villagers) {
+    _vPos.set(v.x, v.y, v.z);
+    _vQuat.setFromAxisAngle({ x: 0, y: 1, z: 0 }, v.yaw);
+    _vMat.compose(_vPos, _vQuat, _vScale);
+    villagerMesh.setMatrixAt(v.slot, _vMat);
+  }
+  villagerMesh.instanceMatrix.needsUpdate = true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ROADS — connect each village to its nearest neighbor (tile-based path)
+// ─────────────────────────────────────────────────────────────────────────────
+const MAX_ROAD_TILES = 900;
+const ROAD_GEO = new THREE.BoxGeometry(3.4, 0.3, 3.4);
+ROAD_GEO.translate(0, 0.15, 0);
+const ROAD_MAT = new THREE.MeshStandardMaterial({ color: 0x5a4a3a, roughness: 1.0 });
+const roadMesh = new THREE.InstancedMesh(ROAD_GEO, ROAD_MAT, MAX_ROAD_TILES);
+roadMesh.frustumCulled = false; roadMesh.receiveShadow = true;
+const _hideRoad = new THREE.Matrix4().makeScale(0, 0, 0);
+for (let i = 0; i < MAX_ROAD_TILES; i++) roadMesh.setMatrixAt(i, _hideRoad);
+roadMesh.instanceMatrix.needsUpdate = true;
+scene.add(roadMesh);
+
+let _roadVCount = -1;
+let _roadTimer  = 0;
+const roadBridges = []; // bridges spanning water along roads (separate from villager-built ones)
+
+function clearRoadBridges() {
+  for (const b of roadBridges) { scene.remove(b); b.geometry.dispose(); }
+  roadBridges.length = 0;
+}
+
+function addRoadBridge(x1, z1, x2, z2) {
+  const dx = x2 - x1, dz = z2 - z1;
+  const len = Math.sqrt(dx*dx + dz*dz);
+  if (len < 0.5) return;
+  const geo = new THREE.BoxGeometry(3.4, 0.4, len);
+  const bridge = new THREE.Mesh(geo, BRIDGE_MAT);
+  bridge.position.set((x1 + x2) * 0.5, G_SEA_LEVEL + 0.5, (z1 + z2) * 0.5);
+  bridge.rotation.y = Math.atan2(dx, dz);
+  bridge.castShadow = true;
+  scene.add(bridge);
+  roadBridges.push(bridge);
+}
+
+function rebuildRoads() {
+  for (let i = 0; i < MAX_ROAD_TILES; i++) roadMesh.setMatrixAt(i, _hideRoad);
+  clearRoadBridges();
+  const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1);
+  let idx = 0;
+  for (let i = 0; i < villageLocations.length; i++) {
+    const a = villageLocations[i];
+    let near = null, nd = Infinity;
+    for (let j = 0; j < villageLocations.length; j++) {
+      if (i === j) continue;
+      const b = villageLocations[j];
+      const d = (a.wx - b.wx) ** 2 + (a.wz - b.wz) ** 2;
+      if (d < nd) { nd = d; near = b; }
+    }
+    if (!near || nd > 4000 * 4000) continue;
+    const dist = Math.sqrt(nd);
+    const segs = Math.min(140, dist / 4.5 | 0);
+
+    // Sample once; classify each sample as dry / wet
+    const samples = [];
+    for (let k = 0; k <= segs; k++) {
+      const t = k / segs;
+      const wx = a.wx + (near.wx - a.wx) * t;
+      const wz = a.wz + (near.wz - a.wz) * t;
+      const wy = getHeight(wx, wz);
+      samples.push({ wx, wz, wy, wet: wy < G_SEA_LEVEL });
+    }
+
+    // Walk through samples. Dry → road tile. A run of wet samples → one bridge
+    // spanning the last dry shore to the next dry shore (so no tiles ever enter water).
+    let k = 0;
+    while (k < samples.length) {
+      if (!samples[k].wet) {
+        if (idx < MAX_ROAD_TILES) {
+          p.set(samples[k].wx, samples[k].wy + 0.1, samples[k].wz);
+          m4.compose(p, q, s);
+          roadMesh.setMatrixAt(idx++, m4);
+        }
+        k++;
+      } else {
+        // Find the next dry sample
+        let j = k;
+        while (j < samples.length && samples[j].wet) j++;
+        if (j >= samples.length) break; // ends in water — drop the trailing leg
+        // Last dry on this side (or first sample if water starts immediately)
+        const shoreA = samples[k > 0 ? k - 1 : k];
+        const shoreB = samples[j];
+        addRoadBridge(shoreA.wx, shoreA.wz, shoreB.wx, shoreB.wz);
+        k = j; // continue placing tiles from the far shore
+      }
+    }
+  }
+  roadMesh.instanceMatrix.needsUpdate = true;
+}
+function updateRoads(dt) {
+  _roadTimer -= dt;
+  if (villageLocations.length !== _roadVCount && _roadTimer <= 0) {
+    _roadVCount = villageLocations.length;
+    _roadTimer  = 1.5;
+    rebuildRoads();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  WEATHER
+// ─────────────────────────────────────────────────────────────────────────────
+let weather        = 'clear';   // 'clear' | 'cloudy' | 'rain' | 'storm'
+let weatherBlend   = 0;         // 0=clear → 1=full weather effect
+let lightningTimer = 8;
+let lightningFlash = 0;
+
+const RAIN_COUNT = 4000;
+const _rainPos   = new Float32Array(RAIN_COUNT * 3);
+for (let i = 0; i < RAIN_COUNT; i++) {
+  _rainPos[i*3]   = (Math.random() - 0.5) * 180;
+  _rainPos[i*3+1] = Math.random() * 55;
+  _rainPos[i*3+2] = (Math.random() - 0.5) * 180;
+}
+const rainGeo = new THREE.BufferGeometry();
+rainGeo.setAttribute('position', new THREE.BufferAttribute(_rainPos, 3));
+const rainMat  = new THREE.PointsMaterial({ color: 0xaaccff, size: 0.22, transparent: true, opacity: 0.55, depthWrite: false });
+const rainMesh = new THREE.Points(rainGeo, rainMat);
+rainMesh.visible = false;
+scene.add(rainMesh);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CLOUDS (instanced puffy spheres at altitude, drift + wrap with player)
+// ─────────────────────────────────────────────────────────────────────────────
+const CLOUD_COUNT = 90;
+const CLOUD_RADIUS = 1800;
+const CLOUD_ALT = 240;
+const cloudGeo = new THREE.SphereGeometry(28, 8, 6);
+const cloudMat = new THREE.MeshLambertMaterial({
+  color: 0xffffff, transparent: true, opacity: 0.55,
+  depthWrite: false, fog: true,
+});
+const cloudMesh = new THREE.InstancedMesh(cloudGeo, cloudMat, CLOUD_COUNT);
+cloudMesh.frustumCulled = false;
+scene.add(cloudMesh);
+
+const _clouds = [];
+for (let i = 0; i < CLOUD_COUNT; i++) {
+  const ang  = Math.random() * Math.PI * 2;
+  const dist = Math.sqrt(Math.random()) * CLOUD_RADIUS;
+  _clouds.push({
+    x:  Math.cos(ang) * dist,
+    z:  Math.sin(ang) * dist,
+    y:  CLOUD_ALT + (Math.random() - 0.5) * 60,
+    sx: 1.4 + Math.random() * 2.4,
+    sy: 0.5 + Math.random() * 0.4,
+    sz: 1.4 + Math.random() * 2.4,
+    drift: 0.6 + Math.random() * 1.2,
+  });
+}
+
+const _cloudM = new THREE.Matrix4();
+const _cloudP = new THREE.Vector3();
+const _cloudQ = new THREE.Quaternion();
+const _cloudS = new THREE.Vector3();
+
+function updateClouds(dt) {
+  // Opacity follows weather: more clouds when overcast/stormy
+  cloudMat.opacity = 0.42 + weatherBlend * 0.42;
+  const cx = camera.position.x, cz = camera.position.z;
+  for (let i = 0; i < CLOUD_COUNT; i++) {
+    const c = _clouds[i];
+    c.x += c.drift * dt * 4;
+    // Wrap so clouds always surround the camera
+    const dx = c.x - cx, dz = c.z - cz;
+    if (dx >  CLOUD_RADIUS) c.x -= CLOUD_RADIUS * 2;
+    if (dx < -CLOUD_RADIUS) c.x += CLOUD_RADIUS * 2;
+    if (dz >  CLOUD_RADIUS) c.z -= CLOUD_RADIUS * 2;
+    if (dz < -CLOUD_RADIUS) c.z += CLOUD_RADIUS * 2;
+    _cloudP.set(c.x, c.y, c.z);
+    _cloudS.set(c.sx, c.sy, c.sz);
+    _cloudM.compose(_cloudP, _cloudQ, _cloudS);
+    cloudMesh.setMatrixAt(i, _cloudM);
+  }
+  cloudMesh.instanceMatrix.needsUpdate = true;
+}
+
+// Fog saved values for blending
+const _clearFogDensity = 0.00045;
+
+function setWeather(w) {
+  weather = w;
+  document.querySelectorAll('.wx-btn').forEach(b => b.classList.toggle('active', b.dataset.wx === w));
+}
+
+function updateWeather(dt) {
+  const isWet   = weather === 'rain' || weather === 'storm';
+  const isStormy = weather === 'storm';
+  const isCloudy = weather === 'cloudy' || isWet;
+
+  // Blend toward target intensity
+  const targetBlend = isCloudy ? 1 : 0;
+  weatherBlend += (targetBlend - weatherBlend) * Math.min(1, dt * 0.4);
+
+  // Rain particles
+  const rainActive = isWet && weatherBlend > 0.05;
+  rainMesh.visible = rainActive;
+  if (rainActive) {
+    const pos   = rainGeo.attributes.position;
+    const speed = isStormy ? 90 : 55;
+    const wind  = isStormy ? 6  : 1.5;
+    const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
+    for (let i = 0; i < RAIN_COUNT; i++) {
+      pos.array[i*3]   += wind * dt * (isStormy ? (Math.random()-0.5) : 0.5);
+      pos.array[i*3+1] -= speed * dt;
+      const dx = pos.array[i*3]   - cx;
+      const dz = pos.array[i*3+2] - cz;
+      const dy = pos.array[i*3+1] - cy;
+      if (dy < -25 || Math.abs(dx) > 90 || Math.abs(dz) > 90) {
+        pos.array[i*3]   = cx + (Math.random()-0.5) * 180;
+        pos.array[i*3+1] = cy + 20 + Math.random() * 35;
+        pos.array[i*3+2] = cz + (Math.random()-0.5) * 180;
+      }
+    }
+    pos.needsUpdate = true;
+    rainMesh.position.set(0, 0, 0);
+    rainMat.opacity = (isStormy ? 0.65 : 0.45) * weatherBlend;
+  }
+
+  // Lightning timer (tick regardless of flash)
+  if (isStormy) {
+    lightningTimer -= dt;
+    if (lightningFlash > 0) lightningFlash -= dt;
+    if (lightningTimer <= 0) {
+      lightningFlash = 0.12;
+      lightningTimer = 6 + Math.random() * 16;
+    }
+  }
+
+  // Sky / fog tint for cloudy/stormy
+  if (weatherBlend > 0.01) {
+    const cloudCol = isStormy
+      ? new THREE.Color(0x1a1f28)
+      : weather === 'rain' ? new THREE.Color(0x4a5560) : new THREE.Color(0x7a8a95);
+    scene.background.lerp(cloudCol, weatherBlend * (isStormy ? 0.85 : 0.6));
+    scene.fog.color.copy(scene.background);
+    scene.fog.density = _clearFogDensity + weatherBlend * (isStormy ? 0.0018 : 0.0008);
+    sun.intensity    *= (1 - weatherBlend * (isStormy ? 0.92 : 0.65));
+    ambient.intensity *= (1 - weatherBlend * (isStormy ? 0.5 : 0.3));
+  }
+
+  // Lightning flash added AFTER cloud dim so it punches through the dark sky
+  if (isStormy && lightningFlash > 0) {
+    ambient.intensity += 4.5 * Math.max(0, lightningFlash / 0.12);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CHUNK SYSTEM
+// ─────────────────────────────────────────────────────────────────────────────
+const chunkCache   = new Map();   // key → THREE.Mesh
+const pendingSet   = new Set();   // keys currently in queue
+const buildQueue   = [];          // [ {cx, cz, priority} ]
+
+const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
+
+// LOD resolution by chunk distance — last two tiers are cheap horizon impostors
+function getChunkRes(dist) {
+  if (dist < 2)   return 72;
+  if (dist < 3.5) return 48;
+  if (dist < 5)   return 28;
+  if (dist < 7)   return 14;
+  if (dist < 9)   return 10;
+  return 8;
+}
+
+function cKey(cx, cz) { return cx + ',' + cz; }
+
+const SKIRT_DROP = 30; // world units skirt hangs below perimeter (worker also has this)
+
+// ── WORKER POOL — terrain generation runs off main thread ───────────────────
+const _workerSrcText = document.getElementById('terrain-worker-src').textContent;
+const _workerBlob    = new Blob([_workerSrcText], { type: 'application/javascript' });
+const _workerUrl     = URL.createObjectURL(_workerBlob);
+const NUM_WORKERS    = 2;
+let _workerGen       = 0;          // incremented on rebuild — stale jobs are discarded
+let _nextJobId       = 1;
+const pendingJobs    = new Map();  // jobId → { cx, cz, res, key, gen }
+const workers        = [];
+
+function _initWorker() {
+  const w = new Worker(_workerUrl);
+  w.busy = false;
+  w.onmessage = e => {
+    const msg = e.data;
+    if (msg.type === 'ready') { /* init complete */ return; }
+    if (msg.type === 'built') {
+      w.busy = false;
+      onChunkBuilt(msg);
+    }
+  };
+  w.postMessage({
+    type: 'init',
+    seed: WORLD_SEED,
+    CHUNK_SIZE, SKIRT_DROP,
+  });
+  return w;
+}
+for (let i = 0; i < NUM_WORKERS; i++) workers.push(_initWorker());
+
+// Guarantee a starting village near the player on land.
+(function spawnStartVillage() {
+  const step = 80;
+  for (let ring = 0; ring <= 12; ring++) {
+    for (let dx = -ring; dx <= ring; dx++) {
+      for (let dz = -ring; dz <= ring; dz++) {
+        if (Math.abs(dx) !== ring && Math.abs(dz) !== ring) continue; // only shell
+        const wx = dx * step, wz = dz * step;
+        if (!canFoundVillage(wx, wz)) continue;
+        const cx = Math.floor(wx / CHUNK_SIZE);
+        const cz = Math.floor(wz / CHUNK_SIZE);
+        const key = cKey(cx, cz);
+        const seed = (Math.imul(cx, 99991) + cz) | 0;
+        buildVillageAt(wx, wz, seed, key).forEach(m => scene.add(m));
+        villageLocations.push({ wx, wz, key });
+        const v0 = { wx, wz, key };
+        for (let i = 0; i < VILLAGER_PER_VILLAGE; i++) spawnVillager(v0);
+        return;
+      }
+    }
+  }
+})();
+
+function reinitWorkers() {
+  // Bump generation so any in-flight responses are discarded.
+  _workerGen++;
+  pendingJobs.clear();
+  for (const w of workers) {
+    w.busy = false;
+    w.postMessage({
+      type: 'init',
+      seed: WORLD_SEED,
+      CHUNK_SIZE, SKIRT_DROP,
+    });
+  }
+}
+
+function onChunkBuilt(msg) {
+  const job = pendingJobs.get(msg.jobId);
+  if (!job) return;                       // canceled / rebuilt
+  if (job.gen !== _workerGen) return;     // stale generation
+  pendingJobs.delete(msg.jobId);
+
+  const { cx, cz, res, key } = job;
+  pendingSet.delete(key);
+
+  // Still want this chunk at this res?
+  const existing = chunkCache.get(key);
+  if (existing && existing.res >= res) return;
+  if (existing) removeChunk(key);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(msg.positions, 3));
+  geo.setAttribute('normal',   new THREE.BufferAttribute(msg.normals,   3));
+  geo.setAttribute('color',    new THREE.BufferAttribute(msg.colors,    3));
+  geo.setIndex(new THREE.BufferAttribute(msg.indices, 1));
+  geo.computeBoundingSphere();
+
+  const mesh = new THREE.Mesh(geo, terrainMat);
+  mesh.receiveShadow = true;
+  mesh.frustumCulled = true;
+
+  // Trees / villages / ruins / lakes still on main thread (need scene + getHeight)
+  const trees = (res >= 48) ? buildChunkTrees(cx, cz) : [];
+  if (res === 72) {
+    const vill = findVillageForChunk(cx, cz);
+    if (vill) {
+      buildVillageAt(vill.wx, vill.wz, vill.seed, key).forEach(m => { scene.add(m); trees.push(m); });
+      villageLocations.push({ wx: vill.wx, wz: vill.wz, key });
+      const newVillage = { wx: vill.wx, wz: vill.wz, key };
+      for (let i = 0; i < VILLAGER_PER_VILLAGE; i++) spawnVillager(newVillage);
+    }
+    const ruin = findRuinForChunk(cx, cz);
+    if (ruin) {
+      buildRuinAt(ruin.wx, ruin.wz, ruin.seed).forEach(m => { scene.add(m); trees.push(m); });
+      ruinLocations.push({ wx: ruin.wx, wz: ruin.wz, key });
+    }
+    const lake = findLakeForChunk(cx, cz);
+    if (lake) {
+      buildLakeAt(lake).forEach(m => { scene.add(m); trees.push(m); });
+      lakeLocations.push({ wx: lake.wx, wz: lake.wz, key });
+    }
+  }
+
+  scene.add(mesh);
+  trees.forEach(t => scene.add(t));
+  chunkCache.set(key, { mesh, res, trees });
+}
+
+function scheduleChunks() {
+  const px = camera.position.x, pz = camera.position.z;
+  const pcx = Math.round(px / CHUNK_SIZE);
+  const pcz = Math.round(pz / CHUNK_SIZE);
+
+  for (let dz = -RENDER_DIST; dz <= RENDER_DIST; dz++) {
+    for (let dx = -RENDER_DIST; dx <= RENDER_DIST; dx++) {
+      const dist = Math.sqrt(dx*dx + dz*dz);
+      if (dist > RENDER_DIST) continue;
+      const cx = pcx + dx, cz = pcz + dz;
+      const key = cKey(cx, cz);
+      const needed = getChunkRes(dist);
+      const cached = chunkCache.get(key);
+
+      if (cached && cached.res >= needed) continue;
+      if (pendingSet.has(key)) continue;
+
+      // Don't evict the lower-res version yet — onChunkBuilt will swap it
+      // in atomically when the worker delivers the higher-res mesh.
+      pendingSet.add(key);
+      buildQueue.push({ cx, cz, priority: dist, res: needed });
+    }
+  }
+
+  buildQueue.sort((a, b) => a.priority - b.priority);
+
+  for (const key of [...chunkCache.keys()]) {
+    const [qx, qz] = key.split(',').map(Number);
+    if (Math.max(Math.abs(qx - pcx), Math.abs(qz - pcz)) > UNLOAD_DIST) removeChunk(key);
+  }
+}
+
+function removeChunk(key) {
+  const obj = chunkCache.get(key);
+  if (!obj) return;
+  scene.remove(obj.mesh);
+  obj.mesh.geometry.dispose();
+  if (obj.trees) obj.trees.forEach(t => scene.remove(t));
+  chunkCache.delete(key);
+  // Remove any village/ruin registered to this chunk
+  for (let i = villageLocations.length - 1; i >= 0; i--)
+    if (villageLocations[i].key === key) villageLocations.splice(i, 1);
+  for (let i = ruinLocations.length - 1; i >= 0; i--)
+    if (ruinLocations[i].key === key) ruinLocations.splice(i, 1);
+  // Despawn villagers belonging to this chunk's village
+  for (const v of villagers) if (v.homeKey === key) despawnVillager(v);
+  obstacles.delete(key);
+  for (let i = lakeLocations.length - 1; i >= 0; i--)
+    if (lakeLocations[i].key === key) lakeLocations.splice(i, 1);
+}
+
+// Dispatches pending builds to free workers. Geometry is constructed
+// in onChunkBuilt() when the worker responds; trees/villages/etc are
+// then run on the main thread (they need scene + getHeight access).
+function processQueue() {
+  for (const w of workers) {
+    if (w.busy || buildQueue.length === 0) continue;
+    const { cx, cz, res } = buildQueue.shift();
+    const key = cKey(cx, cz);
+    const cached = chunkCache.get(key);
+    if (cached && cached.res >= res) { pendingSet.delete(key); continue; }
+
+    const jobId = _nextJobId++;
+    pendingJobs.set(jobId, { cx, cz, res, key, gen: _workerGen });
+    w.busy = true;
+    w.postMessage({
+      type: 'build', jobId, gen: _workerGen,
+      cx, cz, res,
+      G_HEIGHT, G_RIDGE, G_HILL, G_BIOME, G_ERODE, G_SEA_LEVEL,
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  POINTER-LOCK CONTROLS
+// ─────────────────────────────────────────────────────────────────────────────
+const overlay  = document.getElementById('overlay');
+const hud      = document.getElementById('hud');
+const genInd   = document.getElementById('genindicator');
+
+let locked = false;
+let yaw = 0, pitch = 0;
+const keys = {};
+
+overlay.addEventListener('click', () => {
+  renderer.domElement.requestPointerLock();
+});
+
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === renderer.domElement;
+  // Don't show the start overlay when panel is open
+  overlay.style.display = (locked || panelOpen) ? 'none' : 'flex';
+});
+
+document.addEventListener('mousemove', e => {
+  if (!locked) return;
+  yaw   -= e.movementX * 0.0022;
+  pitch -= e.movementY * 0.0022;
+  pitch  = Math.max(-1.55, Math.min(1.55, pitch));
+});
+
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyF') flyMode = !flyMode;
+  if (e.code === 'Tab')  { e.preventDefault(); togglePanel(); }
+  const MOVE_KEYS = ['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ShiftRight','ControlLeft','ControlRight'];
+  if (MOVE_KEYS.includes(e.code)) e.preventDefault();
+});
+document.addEventListener('keyup',   e => { keys[e.code] = false; });
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PLAYER MOVEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+let flyMode   = true;
+let velY      = 0;
+const GRAVITY = -28;
+const PLAYER_HEIGHT = 2.2;
+
+const dir   = new THREE.Vector3();
+const right = new THREE.Vector3();
+const move  = new THREE.Vector3();
+
+function updatePlayer(dt) {
+  if (!locked) return;
+
+  const sprinting = keys['ShiftLeft'] || keys['ShiftRight'];
+  const speed = sprinting ? G_SPEED * 2.4 : G_SPEED;
+
+  // Horizontal movement — negate to match Three.js camera (-Z forward)
+  dir.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+  right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+
+  move.set(0, 0, 0);
+  if (keys['KeyW']) move.addScaledVector(dir,  1);
+  if (keys['KeyS']) move.addScaledVector(dir, -1);
+  if (keys['KeyA']) move.addScaledVector(right,-1);
+  if (keys['KeyD']) move.addScaledVector(right, 1);
+
+  if (move.lengthSq() > 0) {
+    move.normalize().multiplyScalar(speed * dt);
+    camera.position.x += move.x;
+    camera.position.z += move.z;
+  }
+
+  const groundY = getHeight(camera.position.x, camera.position.z);
+
+  if (flyMode) {
+    if (keys['Space'])                              camera.position.y += 50 * dt;
+    if (keys['ControlLeft'] || keys['ControlRight']) camera.position.y -= 50 * dt;
+    if (camera.position.y < groundY + PLAYER_HEIGHT)
+      camera.position.y = groundY + PLAYER_HEIGHT;
+  } else {
+    // Walk mode with gravity + jump
+    if (keys['Space'] && camera.position.y <= groundY + PLAYER_HEIGHT + 0.15)
+      velY = 12;
+    velY += GRAVITY * dt;
+    camera.position.y += velY * dt;
+    if (camera.position.y < groundY + PLAYER_HEIGHT) {
+      camera.position.y = groundY + PLAYER_HEIGHT;
+      velY = 0;
+    }
+  }
+
+  // Apply camera orientation
+  camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+
+  // HUD
+  const alt   = Math.round(camera.position.y);
+  const gnd   = Math.round(groundY);
+  const mode  = flyMode ? 'FLY' : 'WALK';
+  const bname = getBiome(camera.position.x, camera.position.z).name.toUpperCase();
+  const wxIcon = { clear:'☀', cloudy:'☁', rain:'🌧', storm:'⛈' }[weather] || '';
+  hud.textContent =
+    `${mode}  |  ${bname}  ${wxIcon}  |  Alt: ${alt}m  Ground: ${gnd}m  |  X:${Math.round(camera.position.x)}  Z:${Math.round(camera.position.z)}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  MINIMAP  (multi-layer)
+// ─────────────────────────────────────────────────────────────────────────────
+const mmCanvas = document.getElementById('mm');
+const mmCtx    = mmCanvas.getContext('2d');
+const MM_RES   = 100;
+const MM_RANGE = CHUNK_SIZE;
+const mmImg    = mmCtx.createImageData(MM_RES, MM_RES);
+
+let mmLayer = 'terrain';
+let mmTimer = 0;
+
+function setMMLayer(name, btn) {
+  mmLayer = name;
+  document.querySelectorAll('#mm-layers button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  mmTimer = 99; // force immediate redraw
+}
+
+// (minimap uses getHeight directly for accuracy — skipping it caused map offsets)
+
+function drawMinimap() {
+  const px = camera.position.x, pz = camera.position.z;
+  const d  = mmImg.data;
+
+  // Pre-sample heights (needed for contour neighbour comparison)
+  const H   = new Float32Array(MM_RES * MM_RES);
+  const BIO = [];
+  for (let py = 0; py < MM_RES; py++) {
+    for (let px2 = 0; px2 < MM_RES; px2++) {
+      const wx = px + (px2 / MM_RES - 0.5) * MM_RANGE * 2;
+      const wz = pz + (py  / MM_RES - 0.5) * MM_RANGE * 2;
+      const bio = getBiome(wx, wz);
+      BIO.push(bio);
+      H[py * MM_RES + px2] = getHeight(wx, wz);
+    }
+  }
+
+  const CONTOUR_STEP = 20;
+
+  for (let py = 0; py < MM_RES; py++) {
+    for (let px2 = 0; px2 < MM_RES; px2++) {
+      const idx  = py * MM_RES + px2;
+      const h    = H[idx];
+      const bio  = BIO[idx];
+      const i    = idx * 4;
+      const sea  = G_SEA_LEVEL;
+      const maxH = bio.maxH * G_HEIGHT;
+      const abv  = Math.max(0, h - sea);
+
+      let r = 0, g = 0, b = 0;
+
+      if (mmLayer === 'terrain') {
+        if (h < sea) {
+          const t = Math.max(0, 1 - (sea - h) / 30);
+          r = 15 + t*22; g = 65 + t*28; b = 150 + t*30;
+        } else {
+          const shade = Math.max(0.42, 1 - abv / (maxH * 1.1));
+          const C = { mountains:[108,118,98], desert:[200,175,108],
+                      jungle:[28,95,22], forest:[55,130,38], flatland:[95,175,45] }[bio.name];
+          r = C[0]*shade; g = C[1]*shade; b = C[2]*shade;
+        }
+
+      } else if (mmLayer === 'vegetation') {
+        if (h < sea) {
+          r = 15; g = 65; b = 150;
+        } else if (abv < 3) {
+          r = 195; g = 178; b = 128; // beach
+        } else {
+          const treeline = maxH * 0.52;
+          if (bio.name === 'desert') {
+            const t = Math.min(1, abv / 25);
+            r = 195-t*30; g = 162-t*20; b = 88-t*20;
+          } else if (h > treeline * 1.25) {
+            r = 215; g = 218; b = 225; // snow / bare rock
+          } else if (h > treeline) {
+            r = 130; g = 118; b = 95;  // sub-alpine scrub
+          } else {
+            const dense = Math.min(1, abv / 50);
+            const C = { mountains:[70,135,50], jungle:[12,82,10],
+                        forest:[38,112,28], flatland:[112,192,55] }[bio.name] || [80,140,45];
+            r = C[0]*(1-dense*0.28); g = C[1]*(1-dense*0.12); b = C[2]*(1-dense*0.28);
+          }
+        }
+
+      } else if (mmLayer === 'contours') {
+        // Base: soft grey terrain tint
+        if (h < sea) {
+          r = 30; g = 80; b = 160;
+        } else {
+          const shade = 0.38 + Math.min(0.42, abv / (maxH * 1.6));
+          r = g = b = 200 * shade;
+          // Slight biome tint
+          const T = { mountains:[0.9,0.95,0.9], desert:[1.1,1.0,0.75],
+                      jungle:[0.7,1.05,0.65], forest:[0.75,1.0,0.65], flatland:[0.85,1.05,0.65] }[bio.name];
+          r*=T[0]; g*=T[1]; b*=T[2];
+        }
+        // Contour line detection via neighbour height level
+        if (px2 < MM_RES-1 && py < MM_RES-1 && h > sea) {
+          const hR = H[idx + 1], hD = H[idx + MM_RES];
+          const lvH = Math.floor(h  / CONTOUR_STEP);
+          const lvR = Math.floor(hR / CONTOUR_STEP);
+          const lvD = Math.floor(hD / CONTOUR_STEP);
+          if (lvH !== lvR || lvH !== lvD) {
+            // Colour contours by altitude zone
+            const zone = Math.floor(Math.max(0, h) / 60) % 5;
+            const CC = [[80,210,80],[200,210,60],[230,140,40],[200,80,50],[220,220,230]][zone];
+            r = CC[0]; g = CC[1]; b = CC[2];
+          }
+        }
+
+      } else if (mmLayer === 'elevation') {
+        if (h < sea) {
+          const t = Math.max(0, 1 + (h - sea) / 40);
+          r = 5*t; g = 40*t; b = 170*t;
+        } else {
+          const t = Math.min(1, abv / Math.max(1, maxH - sea));
+          // Heatmap: cyan → green → yellow → orange → white
+          if      (t < 0.25) { r=40+t*4*60;  g=160+t*4*60; b=140-t*4*120; }
+          else if (t < 0.5)  { r=100+t*4*110;g=220-t*4*20; b=20; }
+          else if (t < 0.75) { r=230;         g=180-(t-0.5)*4*110; b=15; }
+          else               { r=230+(t-0.75)*4*25; g=70+(t-0.75)*4*150; b=15+(t-0.75)*4*215; }
+        }
+
+      } else { // biomes
+        if (h < sea) { r=20; g=75; b=160; }
+        else {
+          const C = { mountains:[120,130,145], desert:[210,180,105],
+                      jungle:[22,108,20], forest:[52,135,38], flatland:[110,195,55] }[bio.name];
+          r=C[0]; g=C[1]; b=C[2];
+        }
+      }
+
+      d[i]=Math.min(255,r|0); d[i+1]=Math.min(255,g|0); d[i+2]=Math.min(255,b|0); d[i+3]=255;
+    }
+  }
+
+  mmCtx.putImageData(mmImg, 0, 0);
+
+  const mmScale = MM_RES / (MM_RANGE * 2);
+  // Village markers (yellow squares with red border)
+  for (const v of villageLocations) {
+    const mx = MM_RES / 2 + (v.wx - px) * mmScale;
+    const my = MM_RES / 2 + (v.wz - pz) * mmScale;
+    if (mx < -3 || mx > MM_RES + 3 || my < -3 || my > MM_RES + 3) continue;
+    mmCtx.fillStyle = '#ffeb3b';
+    mmCtx.fillRect(mx - 2, my - 2, 4, 4);
+    mmCtx.strokeStyle = '#a3170c';
+    mmCtx.lineWidth = 1;
+    mmCtx.strokeRect(mx - 2, my - 2, 4, 4);
+  }
+  // Lake markers (cyan circle)
+  for (const l of lakeLocations) {
+    const mx = MM_RES / 2 + (l.wx - px) * mmScale;
+    const my = MM_RES / 2 + (l.wz - pz) * mmScale;
+    if (mx < -3 || mx > MM_RES + 3 || my < -3 || my > MM_RES + 3) continue;
+    mmCtx.fillStyle = '#3fb8d8';
+    mmCtx.strokeStyle = '#1a5f78';
+    mmCtx.lineWidth = 1;
+    mmCtx.beginPath();
+    mmCtx.arc(mx, my, 2.5, 0, Math.PI * 2);
+    mmCtx.fill(); mmCtx.stroke();
+  }
+  // Ruin markers (grey diamond)
+  for (const r of ruinLocations) {
+    const mx = MM_RES / 2 + (r.wx - px) * mmScale;
+    const my = MM_RES / 2 + (r.wz - pz) * mmScale;
+    if (mx < -3 || mx > MM_RES + 3 || my < -3 || my > MM_RES + 3) continue;
+    mmCtx.fillStyle = '#cfcfcf';
+    mmCtx.strokeStyle = '#444';
+    mmCtx.lineWidth = 1;
+    mmCtx.beginPath();
+    mmCtx.moveTo(mx, my - 3); mmCtx.lineTo(mx + 3, my);
+    mmCtx.lineTo(mx, my + 3); mmCtx.lineTo(mx - 3, my);
+    mmCtx.closePath();
+    mmCtx.fill(); mmCtx.stroke();
+  }
+
+  // Player position dot + facing arrow
+  const half = MM_RES / 2;
+  // Arrow points in the direction the camera faces (-sin/cos matches movement fix)
+  const ax = -Math.sin(yaw), az = -Math.cos(yaw);
+  const arrowLen = 7;
+  mmCtx.strokeStyle = 'rgba(255,255,255,0.95)';
+  mmCtx.lineWidth = 1.5;
+  mmCtx.beginPath();
+  mmCtx.moveTo(half, half);
+  // +X on minimap = world +X, +Y on minimap = world +Z, so az maps to minimap Y
+  mmCtx.lineTo(half + ax * arrowLen, half + az * arrowLen);
+  mmCtx.stroke();
+  mmCtx.fillStyle = '#fff';
+  mmCtx.beginPath();
+  mmCtx.arc(half, half, 2.5, 0, Math.PI * 2);
+  mmCtx.fill();
+
+  document.getElementById('mm-label').textContent =
+    getBiome(px, pz).name.toUpperCase() + '  ·  ' + mmLayer.toUpperCase();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  WORLD REBUILD
+// ─────────────────────────────────────────────────────────────────────────────
+function rebuildWorld() {
+  for (const key of [...chunkCache.keys()]) removeChunk(key);
+  pendingSet.clear(); buildQueue.length = 0;
+  // Main-thread noise (used by trees/villages/lakes/ruins/animals)
+  sn1 = new SimplexNoise(WORLD_SEED);       sn2 = new SimplexNoise(WORLD_SEED + 7919);
+  sn3 = new SimplexNoise(WORLD_SEED + 15731); snRiver = new SimplexNoise(WORLD_SEED + 31337);
+  snBiomeT = new SimplexNoise(WORLD_SEED + 99991); snBiomeM = new SimplexNoise(WORLD_SEED + 99973);
+  // Worker-side noise + bump generation so any in-flight builds are discarded
+  reinitWorkers();
+  const sy = getHeight(0, 0);
+  camera.position.set(0, Math.max(sy + 30, 60), 0);
+  mmTimer = 99;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  DAY / NIGHT CYCLE
+// ─────────────────────────────────────────────────────────────────────────────
+const _dayCol   = new THREE.Color(0x6ca0c8);
+const _sunriseC = new THREE.Color(0xff8030);
+const _nightC   = new THREE.Color(0x05091a);
+const _hazeCol  = new THREE.Color(0x8aaec8);
+const _tmpCol   = new THREE.Color();
+
+function updateDayNight(dt) {
+  if (!G_DAY_PAUSED) G_DAY_TIME = (G_DAY_TIME + dt * G_DAY_SPEED) % 1;
+
+  // Sun arc: noon at t=0.5, midnight at t=0 / 1
+  const angle = (G_DAY_TIME - 0.25) * Math.PI * 2;
+  const sinA  = Math.sin(angle); // 1 = noon, -1 = midnight
+  const sunH  = sinA * 900;
+
+  sun.position.set(camera.position.x + Math.cos(angle) * 600, sunH, camera.position.z + 300);
+  sun.target.position.set(camera.position.x, 0, camera.position.z);
+  sun.target.updateMatrixWorld();
+  sun.intensity = Math.max(0, sinA) * 3.2;
+
+  const dayT    = Math.max(0, sinA);
+  const horizT  = Math.max(0, 1 - Math.abs(sinA) * 3.5);
+
+  _tmpCol.copy(_nightC).lerp(_dayCol, dayT).lerp(_sunriseC, horizT * 0.6);
+  scene.background.copy(_tmpCol);
+  // Atmospheric haze: fog is slightly bluer/greyer than sky at distance
+  scene.fog.color.copy(_tmpCol).lerp(_hazeCol, dayT * 0.35);
+  scene.fog.density = _clearFogDensity * (1 + dayT * 0.4); // denser in daylight for depth
+  ambient.intensity = 0.25 + dayT * 0.85;
+  hemi.intensity    = 0.30 + dayT * 0.90;
+
+  // Sync time-of-day slider in panel if open
+  const slider = document.getElementById('p-time');
+  if (slider && document.activeElement !== slider)
+    slider.value = G_DAY_TIME.toFixed(3);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ANIMATE
+// ─────────────────────────────────────────────────────────────────────────────
+let lastT = 0;
+let waveT = 0;
+
+function animate(t) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((t - lastT) / 1000, 0.1);
+  lastT = t;
+  waveT += dt;
+
+  // Floating-point recentering: shift everything back to origin when drifting far
+  const _camDist = Math.sqrt(camera.position.x ** 2 + camera.position.z ** 2);
+  if (_camDist > 80000) {
+    const ox = camera.position.x, oz = camera.position.z;
+    camera.position.x = 0; camera.position.z = 0;
+    for (const [, obj] of chunkCache) {
+      obj.mesh.position.x -= ox; obj.mesh.position.z -= oz;
+      if (obj.trees) obj.trees.forEach(t => { t.position.x -= ox; t.position.z -= oz; });
+    }
+    waterMesh.position.x -= ox; waterMesh.position.z -= oz;
+    rainMesh.position.x  -= ox; rainMesh.position.z  -= oz;
+    for (const a of animals) { a.x -= ox; a.z -= oz; }
+    for (const v of villagers) { v.x -= ox; v.z -= oz; v.homeX -= ox; v.homeZ -= oz; }
+    for (const b of bridges) { b.position.x -= ox; b.position.z -= oz; }
+    for (const b of roadBridges) { b.position.x -= ox; b.position.z -= oz; }
+    for (const v of villageLocations) { v.wx -= ox; v.wz -= oz; }
+    for (const r of ruinLocations)    { r.wx -= ox; r.wz -= oz; }
+    for (const l of lakeLocations)    { l.wx -= ox; l.wz -= oz; }
+    // Shift obstacle map keys aren't world coords, just the {x,z} entries
+    for (const arr of obstacles.values()) for (const o of arr) { o.x -= ox; o.z -= oz; }
+    _roadVCount = -1; // force road rebuild
+  }
+
+  updatePlayer(dt);
+  scheduleChunks();
+  processQueue();
+
+  // Redraw minimap every 1.5 s
+  mmTimer += dt;
+  if (mmTimer > 1.5) { drawMinimap(); mmTimer = 0; }
+
+  updateDayNight(dt);
+  updateWeather(dt);
+  _audio.tick(dt);
+  updateClouds(dt);
+  updateAnimals(dt);
+  updateVillagers(dt);
+  updateRoads(dt);
+
+  waterMesh.position.x = camera.position.x;
+  waterMesh.position.z = camera.position.z;
+  waterMesh.position.y = G_SEA_LEVEL + Math.sin(waveT * 0.6) * 0.15;
+
+  // Update water shader uniforms
+  waterMat.uniforms.uTime.value  = waveT;
+  waterMat.uniforms.uCamPos.value.copy(camera.position);
+  waterMat.uniforms.uSunDir.value.copy(sun.position).sub(sun.target.position).normalize();
+  waterMat.uniforms.uFogColor.value.copy(scene.fog.color);
+  waterMat.uniforms.uFogDensity.value = scene.fog.density;
+  waterMat.uniforms.uSkyTint.value.copy(scene.background);
+
+  // Underwater: blend sky + fog toward deep blue based on depth
+  const _underDepth = Math.max(0, G_SEA_LEVEL - camera.position.y);
+  if (_underDepth > 0) {
+    const blend = Math.min(1, _underDepth * 0.4);
+    const fogD  = Math.min(0.06, 0.012 + _underDepth * 0.003);
+    const underCol = new THREE.Color(
+      0.04 + Math.max(0, 0.12 - _underDepth * 0.005),
+      0.18 + Math.max(0, 0.12 - _underDepth * 0.004),
+      0.38 + Math.max(0, 0.08 - _underDepth * 0.003)
+    );
+    scene.background.lerp(underCol, blend);
+    scene.fog.color.copy(scene.background);
+    scene.fog.density = scene.fog.density + (fogD - scene.fog.density) * blend;
+  }
+
+  genInd.textContent = buildQueue.length > 0
+    ? `Generating... (${buildQueue.length} chunks)`
+    : `${chunkCache.size} chunks · ${villageLocations.length}V · ${ruinLocations.length}R · ${lakeLocations.length}L · ${animals.length}🐺 ${villagers.length}🧍 (🍖${stats.eaten} 🏹${villagerStats.caught} 🏘️+${villagerStats.founded} 🌉${villagerStats.bridges})`;
+
+  renderer.render(scene, camera);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  STARTUP & RESIZE
+// ─────────────────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Spawn the player above terrain at origin
+(function spawnPlayer() {
+  const startY = getHeight(0, 0);
+  camera.position.set(0, Math.max(startY + 30, 60), 0);
+})();
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SETTINGS PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+const panel = document.getElementById('panel');
+let panelOpen = false;
+
+function togglePanel() {
+  panelOpen = !panelOpen;
+  panel.classList.toggle('open', panelOpen);
+  if (panelOpen) {
+    document.exitPointerLock();
+    document.getElementById('p-seed').value = WORLD_SEED;
+    document.body.style.cursor = 'default';
+  } else {
+    document.body.style.cursor = 'none';
+    renderer.domElement.requestPointerLock();
+  }
+}
+
+function applyWorld() {
+  const seedInput = document.getElementById('p-seed').value.trim();
+  WORLD_SEED  = seedInput !== '' ? (parseInt(seedInput) | 0) : WORLD_SEED;
+  G_HEIGHT    = parseFloat(document.getElementById('p-height').value);
+  G_RIDGE     = parseFloat(document.getElementById('p-ridge').value);
+  G_HILL      = parseFloat(document.getElementById('p-hill').value);
+  G_BIOME     = parseFloat(document.getElementById('p-biome').value);
+  G_ERODE     = parseFloat(document.getElementById('p-erode').value);
+  rebuildWorld();
+  history.replaceState(null, '', _buildShareURL());
+}
+
+function _buildShareURL() {
+  const p = new URLSearchParams({ seed: WORLD_SEED, h: G_HEIGHT, r: G_RIDGE, hi: G_HILL, b: G_BIOME, e: G_ERODE });
+  return location.pathname + '?' + p.toString();
+}
+
+function shareWorld() {
+  const url = location.origin + _buildShareURL();
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => btn.textContent = orig, 1800);
+  });
+}
+
+function togglePause() {
+  G_DAY_PAUSED = !G_DAY_PAUSED;
+  document.getElementById('btn-pause').textContent = G_DAY_PAUSED ? '▶ Resume Time' : '⏸ Pause Time';
+}
+
+// Live sliders — take effect immediately, no rebuild needed
+function liveSlider(id, valId, setter) {
+  const el = document.getElementById(id);
+  const vl = document.getElementById(valId);
+  el.addEventListener('input', () => { setter(parseFloat(el.value)); vl.textContent = el.value; });
+}
+// Rebuild sliders — just update the label, rebuild happens on button press
+function buildSlider(id, valId) {
+  const el = document.getElementById(id);
+  const vl = document.getElementById(valId);
+  el.addEventListener('input', () => { vl.textContent = parseFloat(el.value).toFixed(2); });
+}
+
+// Sync sliders from URL params
+(function syncSlidersFromURL() {
+  const map = [
+    ['p-height','h-val', G_HEIGHT],['p-ridge','r-val', G_RIDGE],
+    ['p-hill','hl-val', G_HILL],['p-biome','b-val', G_BIOME],['p-erode','er-val', G_ERODE]
+  ];
+  for (const [id, vid, val] of map) {
+    const el = document.getElementById(id);
+    if (el) { el.value = val; document.getElementById(vid).textContent = val.toFixed(2); }
+  }
+  const si = document.getElementById('p-seed');
+  if (si) si.value = WORLD_SEED;
+})();
+
+buildSlider('p-height',   'h-val');
+buildSlider('p-ridge',    'r-val');
+buildSlider('p-hill',     'hl-val');
+buildSlider('p-biome',    'b-val');
+buildSlider('p-erode',    'er-val');
+liveSlider('p-sea',      'sl-val', v => { G_SEA_LEVEL = v; waterMesh.position.y = v; });
+liveSlider('p-speed',    'sp-val', v => { G_SPEED = v; });
+liveSlider('p-dayspeed', 'ds-val', v => { G_DAY_SPEED = v; });
+document.getElementById('p-time').addEventListener('input', e => {
+  G_DAY_TIME = parseFloat(e.target.value);
+  document.getElementById('td-val').textContent = parseFloat(e.target.value).toFixed(2);
+});
+
+// Close panel when clicking back on the canvas
+renderer.domElement.addEventListener('click', () => {
+  if (panelOpen) { togglePanel(); }
+});
+
+// ── AMBIENT SOUND ────────────────────────────────────────────────────────────
+const _audio = (() => {
+  let ctx = null;
+  const nodes = {};
+
+  function getCtx() {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    return ctx;
+  }
+
+  function makeNoise(type, filterType, freq, q) {
+    const c = getCtx();
+    const buf = c.createBuffer(1, c.sampleRate * 2, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const src = c.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    const filt = c.createBiquadFilter();
+    filt.type = filterType; filt.frequency.value = freq;
+    if (q !== undefined) filt.Q.value = q;
+    const gain = c.createGain(); gain.gain.value = 0;
+    src.connect(filt); filt.connect(gain); gain.connect(c.destination);
+    src.start();
+    return { gain, filt };
+  }
+
+  function init() {
+    nodes.rain  = makeNoise('n', 'lowpass',  400);
+    nodes.storm = makeNoise('n', 'lowpass',  200);
+    // Wind: use <audio> element so it works on file:// without fetch
+    const c = getCtx();
+    const windEl = new Audio('assets/wind.mp3');
+    windEl.loop = true; windEl.crossOrigin = 'anonymous';
+    const windSrc  = c.createMediaElementSource(windEl);
+    const windGain = c.createGain(); windGain.gain.value = 0;
+    windSrc.connect(windGain); windGain.connect(c.destination);
+    windEl.play().catch(() => {});
+    nodes.wind = { gain: windGain };
     nodes._birdsTimer = 0;
     nodes._ready = true;
   }

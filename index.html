@@ -2910,26 +2910,28 @@ const _audio = (() => {
 
   function tick(dt) {
     if (!nodes._ready) return;
-    const c = getCtx();
-    const t = c.currentTime;
-    const smooth = 0.06;
+    const smooth = dt * 1.2;
 
     const isRain  = weather === 'rain';
     const isStorm = weather === 'storm';
-    const bio = getBiome(camera.position.x, camera.position.z).name;
-    const groundH = getHeight(camera.position.x, camera.position.z);
-    const isMountain = bio === 'mountains' || groundH > 80;
+    const bio     = getBiome(camera.position.x, camera.position.z).name;
     const isForest   = bio === 'forest' || bio === 'jungle';
+    const isMountain = bio === 'mountains';
     const isClear    = weather === 'clear' || weather === 'cloudy';
 
-    const tRain  = isRain  ? 0.18 : 0;
-    const tStorm = isStorm ? 0.28 : 0;
-    const tWind  = isMountain ? 0.22 : (isStorm ? 0.15 : 0);
-    _birdVol += ((isForest && isClear ? 1 : 0) - _birdVol) * smooth;
+    const tRain  = isRain  ? 0.18 * weatherBlend : 0;
+    const tStorm = isStorm ? 0.28 * weatherBlend : 0;
+    const tWind  = isMountain ? 0.22 : (isStorm ? 0.15 * weatherBlend : 0);
+    _birdVol += ((isForest && isClear ? 1 : 0) - _birdVol) * smooth * 0.05;
 
-    nodes.rain.gain.gain.setTargetAtTime(tRain,  t, 0.8);
-    nodes.storm.gain.gain.setTargetAtTime(tStorm, t, 0.8);
-    nodes.wind.gain.gain.setTargetAtTime(tWind,  t, 1.2);
+    if (!nodes._g) nodes._g = { rain: 0, storm: 0, wind: 0 };
+    const G = nodes._g;
+    G.rain  += (tRain  - G.rain)  * smooth;
+    G.storm += (tStorm - G.storm) * smooth;
+    G.wind  += (tWind  - G.wind)  * smooth * 0.6;
+    nodes.rain.gain.gain.value  = G.rain;
+    nodes.storm.gain.gain.value = G.storm;
+    nodes.wind.gain.gain.value  = G.wind;
 
     // Bird chirps
     nodes._birdsTimer -= dt;

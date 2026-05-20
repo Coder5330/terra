@@ -2278,13 +2278,10 @@ function removeChunk(key) {
   obj.mesh.geometry.dispose();
   if (obj.trees) obj.trees.forEach(t => scene.remove(t));
   chunkCache.delete(key);
-  // Remove any village/ruin registered to this chunk
-  for (let i = villageLocations.length - 1; i >= 0; i--)
-    if (villageLocations[i].key === key) villageLocations.splice(i, 1);
+  // Remove ruins registered to this chunk
   for (let i = ruinLocations.length - 1; i >= 0; i--)
     if (ruinLocations[i].key === key) ruinLocations.splice(i, 1);
-  // Despawn villagers belonging to this chunk's village
-  for (const v of villagers) if (v.homeKey === key) despawnVillager(v);
+  // Keep villageLocations and villagers alive — the people outlive their buildings.
   obstacles.delete(key);
   for (let i = lakeLocations.length - 1; i >= 0; i--)
     if (lakeLocations[i].key === key) lakeLocations.splice(i, 1);
@@ -2893,30 +2890,32 @@ const _audio = (() => {
   }
 
   function init() {
+    const c = getCtx();
+    // Resume context — browsers can leave it suspended even after a user gesture
+    c.resume();
+
     nodes.rain  = makeNoise('n', 'lowpass',  400);
     nodes.storm = makeNoise('n', 'lowpass',  200);
-    // Wind: use <audio> element so it works on file:// without fetch
-    const c = getCtx();
-    const windEl = new Audio('assets/wind.mp3');
-    windEl.loop = true; windEl.crossOrigin = 'anonymous';
-    const windSrc  = c.createMediaElementSource(windEl);
-    const windGain = c.createGain(); windGain.gain.value = 0;
-    windSrc.connect(windGain); windGain.connect(c.destination);
-    windEl.play().catch(() => {});
-    nodes.wind = { gain: windGain };
-    // Birds: looping soft ambience + occasional loud call
-    const ac2 = getCtx();
+
+    const _mediaEls = [];
     function makeMediaNode(src) {
       const el = new Audio(src); el.loop = true;
-      const s = ac2.createMediaElementSource(el);
-      const g = ac2.createGain(); g.gain.value = 0;
-      s.connect(g); g.connect(ac2.destination);
-      el.play().catch(() => {});
+      const s = c.createMediaElementSource(el);
+      const g = c.createGain(); g.gain.value = 0;
+      s.connect(g); g.connect(c.destination);
+      _mediaEls.push(el);
       return { el, gain: g };
     }
+
+    nodes.wind     = makeMediaNode('assets/wind.mp3');
     nodes.birdSoft = makeMediaNode('assets/birdsoft.mp3');
     nodes.birdLoud = makeMediaNode('assets/birdloud.mp3');
     nodes.waves    = makeMediaNode('assets/waves.mp3');
+
+    // Play all after context is running
+    c.resume().then(() => {
+      _mediaEls.forEach(el => el.play().catch(() => {}));
+    });
     nodes._birdsTimer = 4 + Math.random() * 6;
     nodes._loudTimer  = 20 + Math.random() * 30; // loud call every 20-50s
     nodes._ready = true;
@@ -2953,7 +2952,7 @@ const _audio = (() => {
     const groundH = getHeight(camera.position.x, camera.position.z);
     const nearSea = Math.max(0, 1 - (groundH - G_SEA_LEVEL) / 18);
     if (!nodes._g.waves) nodes._g.waves = 0;
-    nodes._g.waves += (nearSea * 0.7 - nodes._g.waves) * smooth * 0.4;
+    nodes._g.waves += (nearSea * 0.22 - nodes._g.waves) * smooth * 0.4;
     nodes.waves.gain.gain.value = nodes._g.waves;
 
     // Soft bird ambience: fade in/out with birdVol

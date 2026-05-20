@@ -172,6 +172,7 @@ canvas { display: block; }
 
   <div class="row">
     <button class="danger" onclick="applyWorld()">↺ Rebuild World</button>
+    <button onclick="shareWorld()" style="flex:1">🔗 Copy URL</button>
   </div>
 
   <h3>Live — No Rebuild</h3>
@@ -607,7 +608,9 @@ class SimplexNoise {
 // ─────────────────────────────────────────────────────────────────────────────
 //  WORLD CONSTANTS & NOISE INSTANCES
 // ─────────────────────────────────────────────────────────────────────────────
-let WORLD_SEED = Math.random() * 1e9 | 0;
+// Load from URL params if present
+const _qp = new URLSearchParams(location.search);
+let WORLD_SEED = _qp.has('seed') ? (parseInt(_qp.get('seed')) | 0) : (Math.random() * 1e9 | 0);
 let sn1      = new SimplexNoise(WORLD_SEED);
 let sn2      = new SimplexNoise(WORLD_SEED + 7919);
 let sn3      = new SimplexNoise(WORLD_SEED + 15731);
@@ -616,11 +619,11 @@ let snBiomeT = new SimplexNoise(WORLD_SEED + 99991);
 let snBiomeM = new SimplexNoise(WORLD_SEED + 99973);
 
 // ── Tweakable world params (rebuilt on Apply) ─────────────────────────────
-let G_HEIGHT  = 1.0;   // overall terrain height scale
-let G_RIDGE   = 1.0;   // mountain / ridge prominence
-let G_HILL    = 1.0;   // rolling hill amplitude
-let G_BIOME   = 1.0;   // biome region size (larger = bigger biomes)
-let G_ERODE   = 1.0;   // erosion intensity (gullies, talus, ridge wear)
+let G_HEIGHT  = _qp.has('h')  ? parseFloat(_qp.get('h'))  : 1.0;
+let G_RIDGE   = _qp.has('r')  ? parseFloat(_qp.get('r'))  : 1.0;
+let G_HILL    = _qp.has('hi') ? parseFloat(_qp.get('hi')) : 1.0;
+let G_BIOME   = _qp.has('b')  ? parseFloat(_qp.get('b'))  : 1.0;
+let G_ERODE   = _qp.has('e')  ? parseFloat(_qp.get('e'))  : 1.0;
 // ── Live params (no rebuild needed) ──────────────────────────────────────
 let G_SEA_LEVEL  = 6;    // water surface height (= SEA_LEVEL used elsewhere)
 let G_SPEED      = 38;   // base move speed
@@ -2712,6 +2715,7 @@ function animate(t) {
 
   updateDayNight(dt);
   updateWeather(dt);
+  _audio.tick(dt);
   updateClouds(dt);
   updateAnimals(dt);
   updateVillagers(dt);
@@ -2794,6 +2798,22 @@ function applyWorld() {
   G_BIOME     = parseFloat(document.getElementById('p-biome').value);
   G_ERODE     = parseFloat(document.getElementById('p-erode').value);
   rebuildWorld();
+  history.replaceState(null, '', _buildShareURL());
+}
+
+function _buildShareURL() {
+  const p = new URLSearchParams({ seed: WORLD_SEED, h: G_HEIGHT, r: G_RIDGE, hi: G_HILL, b: G_BIOME, e: G_ERODE });
+  return location.pathname + '?' + p.toString();
+}
+
+function shareWorld() {
+  const url = location.origin + _buildShareURL();
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => btn.textContent = orig, 1800);
+  });
 }
 
 function togglePause() {
@@ -2814,6 +2834,20 @@ function buildSlider(id, valId) {
   el.addEventListener('input', () => { vl.textContent = parseFloat(el.value).toFixed(2); });
 }
 
+// Sync sliders from URL params
+(function syncSlidersFromURL() {
+  const map = [
+    ['p-height','h-val', G_HEIGHT],['p-ridge','r-val', G_RIDGE],
+    ['p-hill','hl-val', G_HILL],['p-biome','b-val', G_BIOME],['p-erode','er-val', G_ERODE]
+  ];
+  for (const [id, vid, val] of map) {
+    const el = document.getElementById(id);
+    if (el) { el.value = val; document.getElementById(vid).textContent = val.toFixed(2); }
+  }
+  const si = document.getElementById('p-seed');
+  if (si) si.value = WORLD_SEED;
+})();
+
 buildSlider('p-height',   'h-val');
 buildSlider('p-ridge',    'r-val');
 buildSlider('p-hill',     'hl-val');
@@ -2831,6 +2865,100 @@ document.getElementById('p-time').addEventListener('input', e => {
 renderer.domElement.addEventListener('click', () => {
   if (panelOpen) { togglePanel(); }
 });
+
+// ── AMBIENT SOUND ────────────────────────────────────────────────────────────
+const _audio = (() => {
+  let ctx = null;
+  const nodes = {};
+
+  function getCtx() {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    return ctx;
+  }
+
+  function makeNoise(type, filterType, freq, q) {
+    const c = getCtx();
+    const buf = c.createBuffer(1, c.sampleRate * 2, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const src = c.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    const filt = c.createBiquadFilter();
+    filt.type = filterType; filt.frequency.value = freq;
+    if (q !== undefined) filt.Q.value = q;
+    const gain = c.createGain(); gain.gain.value = 0;
+    src.connect(filt); filt.connect(gain); gain.connect(c.destination);
+    src.start();
+    return { gain, filt };
+  }
+
+  function init() {
+    nodes.rain  = makeNoise('n', 'lowpass',  400);
+    nodes.storm = makeNoise('n', 'lowpass',  200);
+    nodes.wind  = makeNoise('n', 'bandpass', 320, 0.4);
+    // LFO for wind howl
+    const c = getCtx();
+    const lfo = c.createOscillator(); lfo.frequency.value = 0.18;
+    const lfoGain = c.createGain(); lfoGain.gain.value = 140;
+    lfo.connect(lfoGain); lfoGain.connect(nodes.wind.filt.frequency);
+    lfo.start();
+    nodes._birdsTimer = 0;
+    nodes._ready = true;
+  }
+
+  let _birdVol = 0;
+
+  function tick(dt) {
+    if (!nodes._ready) return;
+    const c = getCtx();
+    const t = c.currentTime;
+    const smooth = 0.06;
+
+    const isRain  = weather === 'rain';
+    const isStorm = weather === 'storm';
+    const bio = getBiome(camera.position.x, camera.position.z).name;
+    const groundH = getHeight(camera.position.x, camera.position.z);
+    const isMountain = bio === 'mountains' || groundH > 80;
+    const isForest   = bio === 'forest' || bio === 'jungle';
+    const isClear    = weather === 'clear' || weather === 'cloudy';
+
+    const tRain  = isRain  ? 0.18 : 0;
+    const tStorm = isStorm ? 0.28 : 0;
+    const tWind  = isMountain ? 0.22 : (isStorm ? 0.15 : 0);
+    _birdVol += ((isForest && isClear ? 1 : 0) - _birdVol) * smooth;
+
+    nodes.rain.gain.gain.setTargetAtTime(tRain,  t, 0.8);
+    nodes.storm.gain.gain.setTargetAtTime(tStorm, t, 0.8);
+    nodes.wind.gain.gain.setTargetAtTime(tWind,  t, 1.2);
+
+    // Bird chirps
+    nodes._birdsTimer -= dt;
+    if (nodes._birdsTimer <= 0 && _birdVol > 0.1) {
+      nodes._birdsTimer = 1.5 + Math.random() * 3;
+      const numChirps = 2 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < numChirps; i++) {
+        const osc = c.createOscillator();
+        const g   = c.createGain();
+        osc.connect(g); g.connect(c.destination);
+        const baseFreq = 1200 + Math.random() * 1600;
+        const startT   = t + i * (0.08 + Math.random() * 0.12);
+        const dur      = 0.06 + Math.random() * 0.1;
+        osc.frequency.setValueAtTime(baseFreq, startT);
+        osc.frequency.linearRampToValueAtTime(baseFreq * (1.1 + Math.random() * 0.3), startT + dur);
+        g.gain.setValueAtTime(0, startT);
+        g.gain.linearRampToValueAtTime(0.06 * _birdVol, startT + 0.01);
+        g.gain.linearRampToValueAtTime(0, startT + dur);
+        osc.start(startT); osc.stop(startT + dur + 0.05);
+      }
+    }
+  }
+
+  return { init, tick };
+})();
+
+// Start audio on first user interaction
+window.addEventListener('click', () => { _audio.init(); }, { once: true });
+window.addEventListener('keydown', () => { _audio.init(); }, { once: true });
 
 animate(0);
 </script>

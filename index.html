@@ -482,13 +482,15 @@ function buildChunkData(cx, cz, res) {
     { gIdx: i => i * res,           x: () => ox,             z: i => oz + i * step },
     { gIdx: i => i * res + res - 1, x: () => ox + CHUNK_SIZE, z: i => oz + i * step },
   ];
+  // Extend skirt outward horizontally so it overlaps neighbour chunk, hiding LOD seams
+  const _seamExt = [[0,-3],[0,3],[-3,0],[3,0]]; // per-edge [dx,dz] outward offset
   edges.forEach((e, ei) => {
     for (let i = 0; i < res; i++) {
       const gv = e.gIdx(i);
       const sv = skirtOff + ei * res + i;
-      positions[sv*3]   = e.x(i);
+      positions[sv*3]   = e.x(i) + _seamExt[ei][0];
       positions[sv*3+1] = H[gv] - SKIRT_DROP;
-      positions[sv*3+2] = e.z(i);
+      positions[sv*3+2] = e.z(i) + _seamExt[ei][1];
       normals[sv*3]   = normals[gv*3];
       normals[sv*3+1] = normals[gv*3+1];
       normals[sv*3+2] = normals[gv*3+2];
@@ -1540,6 +1542,7 @@ function spawnVillager(village) {
     state: 'idle', stateTimer: Math.random() * 4,
     reproTimer: 25 + Math.random() * 20,
     migrateDir: 0, migrateSteps: 0, migrateGroupId: -1, stuckCounter: 0,
+    _stuckX: x, _stuckZ: z, _stuckTimer: 3 + Math.random() * 2,
   };
   _vSlots[slot] = v;
   villagers.push(v);
@@ -1832,6 +1835,18 @@ function updateVillagers(dt) {
     v.y = Math.max(G_SEA_LEVEL, getHeight(v.x, v.z));
     if (v.vx*v.vx + v.vz*v.vz > 0.1) v.yaw = Math.atan2(v.vx, v.vz);
 
+    // Stuck detection: if barely moved in 3s, kick in a new direction
+    v._stuckTimer -= dt;
+    if (v._stuckTimer <= 0) {
+      const moved = (v.x - v._stuckX) ** 2 + (v.z - v._stuckZ) ** 2;
+      if (moved < 5 * 5) {
+        if (v.state === 'migrating') v.migrateDir += Math.PI * (0.5 + Math.random());
+        else { v.state = 'idle'; v.stateTimer = 0.1; }
+      }
+      v._stuckX = v.x; v._stuckZ = v.z;
+      v._stuckTimer = 3 + Math.random() * 2;
+    }
+
     const ddx = v.x - camera.position.x, ddz = v.z - camera.position.z;
     if (ddx*ddx + ddz*ddz > 1100*1100) despawnVillager(v);
   }
@@ -1886,36 +1901,41 @@ function addRoadBridge(x1, z1, x2, z2) {
   roadBridges.push(bridge);
 }
 
-function rebuildRoads() {
+let _roadGen  = null;
+let _roadDirty = false;
+
+function* _roadBuildGen() {
   for (let i = 0; i < MAX_ROAD_TILES; i++) roadMesh.setMatrixAt(i, _hideRoad);
   clearRoadBridges();
+  roadMesh.instanceMatrix.needsUpdate = true;
+  yield;
+
   const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1);
   let idx = 0;
-  for (let i = 0; i < villageLocations.length; i++) {
-    const a = villageLocations[i];
+  const locs = villageLocations.slice(); // snapshot
+
+  for (let i = 0; i < locs.length; i++) {
+    const a = locs[i];
     let near = null, nd = Infinity;
-    for (let j = 0; j < villageLocations.length; j++) {
+    for (let j = 0; j < locs.length; j++) {
       if (i === j) continue;
-      const b = villageLocations[j];
-      const d = (a.wx - b.wx) ** 2 + (a.wz - b.wz) ** 2;
-      if (d < nd) { nd = d; near = b; }
+      const d = (a.wx - locs[j].wx) ** 2 + (a.wz - locs[j].wz) ** 2;
+      if (d < nd) { nd = d; near = locs[j]; }
     }
-    if (!near || nd > 4000 * 4000) continue;
+    if (!near || nd > 4000 * 4000) { yield; continue; }
+
     const dist = Math.sqrt(nd);
     const segs = Math.min(140, dist / 4.5 | 0);
-
-    // Sample once; classify each sample as dry / wet
     const samples = [];
     for (let k = 0; k <= segs; k++) {
       const t = k / segs;
       const wx = a.wx + (near.wx - a.wx) * t;
       const wz = a.wz + (near.wz - a.wz) * t;
-      const wy = getHeight(wx, wz);
-      samples.push({ wx, wz, wy, wet: wy < G_SEA_LEVEL });
+      samples.push({ wx, wz, wy: getHeight(wx, wz), wet: false });
+      if (k % 15 === 0) yield; // yield every 15 height samples
     }
+    for (const sp of samples) sp.wet = sp.wy < G_SEA_LEVEL;
 
-    // Walk through samples. Dry → road tile. A run of wet samples → one bridge
-    // spanning the last dry shore to the next dry shore (so no tiles ever enter water).
     let k = 0;
     while (k < samples.length) {
       if (!samples[k].wet) {
@@ -1926,26 +1946,30 @@ function rebuildRoads() {
         }
         k++;
       } else {
-        // Find the next dry sample
         let j = k;
         while (j < samples.length && samples[j].wet) j++;
-        if (j >= samples.length) break; // ends in water — drop the trailing leg
-        // Last dry on this side (or first sample if water starts immediately)
-        const shoreA = samples[k > 0 ? k - 1 : k];
-        const shoreB = samples[j];
-        addRoadBridge(shoreA.wx, shoreA.wz, shoreB.wx, shoreB.wz);
-        k = j; // continue placing tiles from the far shore
+        if (j >= samples.length) break;
+        addRoadBridge(samples[k > 0 ? k - 1 : k].wx, samples[k > 0 ? k - 1 : k].wz, samples[j].wx, samples[j].wz);
+        k = j;
       }
     }
+    roadMesh.instanceMatrix.needsUpdate = true;
+    yield;
   }
-  roadMesh.instanceMatrix.needsUpdate = true;
 }
+
 function updateRoads(dt) {
   _roadTimer -= dt;
   if (villageLocations.length !== _roadVCount && _roadTimer <= 0) {
-    _roadVCount = villageLocations.length;
-    _roadTimer  = 1.5;
-    rebuildRoads();
+    _roadVCount  = villageLocations.length;
+    _roadTimer   = 1.5;
+    _roadGen     = _roadBuildGen();
+  }
+  if (_roadGen) {
+    const deadline = performance.now() + 2; // max 2 ms per frame
+    while (performance.now() < deadline) {
+      if (_roadGen.next().done) { _roadGen = null; break; }
+    }
   }
 }
 
@@ -2318,6 +2342,35 @@ const genInd   = document.getElementById('genindicator');
 
 let locked = false;
 let yaw = 0, pitch = 0;
+
+// ── SAVE / RESTORE ───────────────────────────────────────────────────────────
+const _SAVE_KEY = '3dworld_v1';
+function saveGame() {
+  localStorage.setItem(_SAVE_KEY, JSON.stringify({
+    px: camera.position.x, py: camera.position.y, pz: camera.position.z,
+    yaw, pitch,
+    seed: WORLD_SEED, h: G_HEIGHT, r: G_RIDGE, hi: G_HILL, b: G_BIOME, e: G_ERODE,
+  }));
+}
+setInterval(saveGame, 30000);
+window.addEventListener('beforeunload', saveGame);
+
+// Restore seed + settings from save if no URL params present
+(function restoreGame() {
+  if (_qp.has('seed')) return; // shared URL takes priority
+  try {
+    const d = JSON.parse(localStorage.getItem(_SAVE_KEY) || 'null');
+    if (!d) return;
+    WORLD_SEED = d.seed ?? WORLD_SEED;
+    G_HEIGHT = d.h ?? G_HEIGHT; G_RIDGE = d.r  ?? G_RIDGE;
+    G_HILL   = d.hi ?? G_HILL;  G_BIOME = d.b  ?? G_BIOME; G_ERODE = d.e ?? G_ERODE;
+    yaw = d.yaw ?? 0; pitch = d.pitch ?? 0;
+    // Defer position restore until terrain is ready
+    setTimeout(() => {
+      camera.position.set(d.px ?? 0, d.py ?? 80, d.pz ?? 0);
+    }, 1200);
+  } catch(e) {}
+})();
 const keys = {};
 
 overlay.addEventListener('click', () => {

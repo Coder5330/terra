@@ -2761,7 +2761,7 @@ function animate(t) {
 
   // Redraw minimap every 1.5 s
   mmTimer += dt;
-  if (mmTimer > 1.5) { drawMinimap(); mmTimer = 0; }
+  if (mmTimer > 0.25) { drawMinimap(); mmTimer = 0; }
 
   updateDayNight(dt);
   updateWeather(dt);

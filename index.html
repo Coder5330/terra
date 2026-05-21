@@ -2670,6 +2670,19 @@ function drawMinimap() {
 function rebuildWorld() {
   for (const key of [...chunkCache.keys()]) removeChunk(key);
   pendingSet.clear(); buildQueue.length = 0;
+
+  // Remove old villages
+  villageLocations.length = 0;
+  ruinLocations.length = 0;
+  lakeLocations.length = 0;
+  for (const v of villagers) despawnVillager(v);
+  villagers.length = 0;
+  for (const a of animals) despawnAnimal(a);
+  animals.length = 0;
+  bridges.forEach(b => { scene.remove(b); b.geometry.dispose(); });
+  bridges.length = 0;
+  clearRoadBridges();
+  
   // Main-thread noise (used by trees/villages/lakes/ruins/animals)
   sn1 = new SimplexNoise(WORLD_SEED);       sn2 = new SimplexNoise(WORLD_SEED + 7919);
   sn3 = new SimplexNoise(WORLD_SEED + 15731); snRiver = new SimplexNoise(WORLD_SEED + 31337);

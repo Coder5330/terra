@@ -2759,9 +2759,9 @@ function animate(t) {
   scheduleChunks();
   processQueue();
 
-  // Redraw minimap every 1.5 s
+  // Redraw minimap every 0.05 s
   mmTimer += dt;
-  if (mmTimer > 0.25) { drawMinimap(); mmTimer = 0; }
+  if (mmTimer > 0.05) { drawMinimap(); mmTimer = 0; }
 
   updateDayNight(dt);
   updateWeather(dt);

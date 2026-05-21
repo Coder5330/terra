@@ -3002,7 +3002,7 @@ const _audio = (() => {
 
     const tRain  = isRain  ? 0.18 * weatherBlend : 0;
     const tStorm = isStorm ? 0.28 * weatherBlend : 0;
-    const tWind  = isMountain ? 0.22 : (isStorm ? 0.15 * weatherBlend : 0);
+    const tWind  = isMountain ? 0.7 : (isStorm ? 0.15 * weatherBlend : 0);
     _birdVol += ((isForest && isClear ? 1 : 0) - _birdVol) * smooth * 0.05;
 
     if (!nodes._g) nodes._g = { rain: 0, storm: 0, wind: 0 };
